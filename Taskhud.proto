@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package mq.proto.taskhud;
+
+enum MessageId {
+	Request = 0;
+	Incoming = 1;
+}
+
+message TaskHud {
+	MessageId id = 1;
+	optional TaskTable TaskTable = 2;
+}
+
+message Objective {
+    string objectiveText = 1;
+    bool isCompleted = 2;
+    int32 progress = 3;
+	int32 objIndex = 4;
+}
+
+message Task {
+    string name = 1;
+    repeated Objective objectives = 2;
+}
+
+message TaskTable {
+	string character = 1;
+	repeated Task tasks = 2;
+}
