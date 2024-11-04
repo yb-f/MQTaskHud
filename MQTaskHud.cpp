@@ -20,30 +20,105 @@ const int FIRST_WINDOW_HEIGHT = 490;
 postoffice::DropboxAPI THDropbox;
 
 bool b_showMQTaskHudWindow = false;
-bool b_debugMode = false;
+bool b_anonMode = false;
 int i_selectedCharIndex = 0;
 int i_selectedPeerIndex = 0;
 int i_selectedTaskIndex = 0;
 
-//sample data, clear before release
-std::vector<char*> peerList = { "Peer1", "Peer2", "Peer3" };
+std::vector<std::string> peerList = { };
 
-const std::vector<char*> peerType = { "Group", "Zone", "All" };
+const std::vector<std::string> peerType = { "Group", "Zone", "All" };
 
 std::vector<Character> fullTaskTable;
+
+std::string AnonymizeName(const std::string& name)
+{
+	if (name.empty()) return name;
+	return std::string(1, name.front()) + "***" + std::string(1, name.back());
+}
+
+void PrintTaskTable()
+{
+	if (fullTaskTable.empty())
+	{
+		WriteChatf(PLUGIN_MSG "Table empty");
+	}
+	for (const auto& character : fullTaskTable) {
+		std::string displayedName = b_anonMode ? AnonymizeName(character.name) : character.name;
+		WriteChatf("Character: \ar%s\aw", displayedName.c_str());
+
+		for (const auto& task : character.tasks) {
+			WriteChatf("  Task: \ay%s\aw", task.name.c_str());
+
+			for (const auto& objective : task.objectives) {
+				WriteChatf("    Objective: \ag%s\aw - Complete: \ag%s\aw - Progress: \ag%d\aw - Required: \ag%d\aw Index: \ag%d\aw",
+					objective.objectiveText.c_str(),
+					objective.isCompleted ? "true" : "false",
+					objective.progress,
+					objective.required,
+					objective.index
+				);
+				if (!objective.objectiveDifferences.empty())
+				{
+					WriteChatf("      Objective Differences:");
+					for (const auto& diffPair : objective.objectiveDifferences)
+					{
+						const std::vector<ObjectiveDifference>& differences = diffPair.second;
+
+						for (const auto& diff : differences)
+						{
+							std::string displayedName = b_anonMode ? AnonymizeName(diff.characterName) : diff.characterName;
+							WriteChatf("        Character: \ar%s\aw - Is Ahead: \ag%s\aw",
+								displayedName.c_str(),
+								diff.isAhead ? "true" : "false"
+							);
+						}
+					}
+				}
+			}
+
+			if (!task.missingList.empty())
+			{
+				WriteChatf("    Missing List:");
+				for (const auto& missing : task.missingList) {
+					std::string displayedMissingName = b_anonMode ? AnonymizeName(missing) : missing;
+					WriteChatf("      Character: \ar%s\aw", displayedMissingName.c_str());
+				}
+			}
+		}
+	}
+}
+
+void RequestTasks()
+{
+	WriteChatf(PLUGIN_MSG "Request task function");
+	postoffice::Address address;
+	address.Mailbox = "taskhud";
+	proto::taskhud::TaskHud message;
+	proto::taskhud::RequestMessage reqMsg;
+	reqMsg.set_reqchar(pLocalPlayer->DisplayedName);
+	message.set_id(proto::taskhud::Request);
+	message.set_payload(reqMsg.SerializeAsString());
+	THDropbox.Post(address, message);
+}
 
 void TH_Cmd(PlayerClient* pChar, char* szLine) {
 	char Arg[MAX_STRING] = { 0 };
 	GetMaybeQuotedArg(Arg, MAX_STRING, szLine, 1);
 	if (strlen(Arg)) {
 		if (ci_equals(Arg, "help")) {
-			WriteChatf(PLUGIN_MSG "\ar/th show \ag--- Show UI");
-			WriteChatf(PLUGIN_MSG "\ar/th hide \ag--- Hide UI");
-			WriteChatf(PLUGIN_MSG "\ar/th debug \ag-- Toggle debug mode");
+			WriteChatf(PLUGIN_MSG "\ar/th show    \ag--- Show UI");
+			WriteChatf(PLUGIN_MSG "\ar/th hide    \ag--- Hide UI");
+			WriteChatf(PLUGIN_MSG "\ar/th anon    \ag--- Anonymize character names");
+			WriteChatf(PLUGIN_MSG "\ar/th refresh \ag--- Refresh data");
 			return;
 		}
 		if (ci_equals(Arg, "show")) {
 			WriteChatf(PLUGIN_MSG "Showing UI.");
+			if (fullTaskTable.empty())
+			{
+				RequestTasks();
+			}
 			b_showMQTaskHudWindow = true;
 			return;
 		}
@@ -52,45 +127,66 @@ void TH_Cmd(PlayerClient* pChar, char* szLine) {
 			b_showMQTaskHudWindow = false;
 			return;
 		}
-		if (ci_equals(Arg, "debug")) {
-			WriteChatf(PLUGIN_MSG "Toggling debug mode \ar%s\ag.", b_debugMode ? "off" : "on");
-			b_debugMode = !b_debugMode;
+		if (ci_equals(Arg, "anon"))
+		{
+			WriteChatf(PLUGIN_MSG "Toggling anonymous mode \ar%s\ag.", b_anonMode ? "off" : "on");
+			b_anonMode = !b_anonMode;
 			return;
 		}
-		if (ci_equals(Arg, "test")) {
-			//just a test arg, move along, nothing to see here.
-			request_tasks();
+		if (ci_equals(Arg, "refresh"))
+		{
+			RequestTasks();
+		}
+		if (ci_equals(Arg, "dumptable"))
+		{
+			PrintTaskTable();
 		}
 	}
 }
 
-std::vector<Task> get_tasks()
+int FindCharacterIndexByName(const std::vector<Character>& characters, const std::string& name)
+{
+	auto it = std::find_if(characters.begin(), characters.end(), [&name](const Character& character) { return character.name == name; });
+	if (it != characters.end()) {
+		return std::distance(characters.begin(), it);
+	}
+	else
+	{
+		return -1;
+	}
+}
+
+std::vector<Task> GetTasks()
 {
 	std::vector<Task> myTasks;
 	for (int i = 0; i <= MAX_QUEST_ENTRIES; ++i)
 	{
 		const auto& task = pTaskManager->QuestEntries[i];
 		if (strlen(task.TaskTitle))
-		{ 
+		{
 			Task tmpTask(task.TaskTitle);
 			auto taskStatus = pTaskManager->GetTaskStatus(pLocalPC, i, task.TaskSystem);
 			for (int j = 0; j < MAX_TASK_ELEMENTS; ++j)
 			{
 				char szTemp[MAX_STRING] = { 0 };
 				pTaskManager->GetElementDescription(&task.Elements[j], szTemp);
-				if (strcmp(szTemp, "? ? ?") == 0 || strcmp(szTemp, "ERROR: String not found. (0)") == 0)
+				if (strcmp(szTemp, "? ? ?") == 0)
 				{
-					continue; // Skip this objective and move to the next
+					tmpTask.addObjective(Objective(szTemp, false, -1, -1, j));
+				}
+				else if (strcmp(szTemp, "ERROR: String not found. (0)") == 0)
+				{
+					continue;
 				}
 				else
 				{
-					if (taskStatus->CurrentCounts[j] == task.Elements[j].RequiredCount)
+					if (taskStatus->CurrentCounts[j] >= task.Elements[j].RequiredCount)
 					{
-						tmpTask.addObjective(Objective(szTemp, true, 0, j));
+						tmpTask.addObjective(Objective(szTemp, true, 0, 0, j));
 					}
 					else
 					{
-						tmpTask.addObjective(Objective(szTemp, false, taskStatus->CurrentCounts[j], j));
+						tmpTask.addObjective(Objective(szTemp, false, taskStatus->CurrentCounts[j], task.Elements[j].RequiredCount, j));
 					}
 				}
 			}
@@ -100,17 +196,20 @@ std::vector<Task> get_tasks()
 	return myTasks;
 }
 
-void send_tasks(std::vector<Task> tasks)
+void SendTasks(const std::vector<Task>& tasks)
 {
-	proto::taskhud::TaskHud message;
-
-	message.set_id(proto::taskhud::Incoming);
-
-	proto::taskhud::TaskTable* taskTable = message.mutable_tasktable();
+	if (GetGameState() != GAMESTATE_INGAME)
+	{
+		return;
+	}
+	
+	proto::taskhud::TaskTable message;
+	WriteChatf(PLUGIN_MSG "Sending tasks now");
+	message.set_character(pLocalPlayer->DisplayedName);
 
 	for (const auto& task : tasks)
 	{
-		proto::taskhud::Task* protoTask = taskTable->add_tasks();
+		proto::taskhud::Task* protoTask = message.add_tasks();
 		protoTask->set_name(task.name);
 		for (const auto& objective : task.objectives)
 		{
@@ -118,26 +217,99 @@ void send_tasks(std::vector<Task> tasks)
 			protoObjective->set_objectivetext(objective.objectiveText);
 			protoObjective->set_iscompleted(objective.isCompleted);
 			protoObjective->set_progress(objective.progress);
-			protoObjective->set_objindex(objective.index);
+			protoObjective->set_required(objective.required);
+			protoObjective->set_index(objective.index);
 
 		}
 	}
-	std::string serializedData;
-	message.SerializeToString(&serializedData);
-	postoffice::Address address;
-	address.Name = "taskhud";
 
-	THDropbox.Post(address, message);
-}
-
-void request_tasks()
-{
 	postoffice::Address address;
 	address.Mailbox = "taskhud";
-	proto::taskhud::TaskHud message;
-	message.set_id(proto::taskhud::Request);
-	THDropbox.Post(address, message);
+	proto::taskhud::TaskHud payload;
+	payload.set_id(proto::taskhud::Incoming);
+	payload.set_payload(message.SerializeAsString());
+	THDropbox.Post(address, payload);
+}
+
+
+
+void CompareTasks()
+{
+	for (auto& currentCharacter : fullTaskTable)
+	{
+		for (auto& currentTask : currentCharacter.tasks)
+		{
+			currentTask.clearMissingList();
+
+			for (const auto& otherCharacter : fullTaskTable)
+			{
+				if (currentCharacter.name == otherCharacter.name)
+				{
+					continue;
+				}
+
+				bool taskFound = false;
+				for (const auto& otherTask : otherCharacter.tasks)
+				{
+					if (otherTask.name == currentTask.name)
+					{
+						taskFound = true;
+						for (auto& currentObjective : currentTask.objectives)
+						{
+							bool objectiveFound = false;
+							for (const auto& otherObjective : otherTask.objectives)
+							{
+								if (currentObjective.index == otherObjective.index)
+								{
+									objectiveFound = true;
+									currentObjective.compareWith(otherObjective, otherCharacter.name);
+									break;
+								}
+							}
+						}
+						break;
+					}
+				}
+				if (!taskFound)
+				{
+					currentTask.missingList.push_back(otherCharacter.name);
+				}
+			}
+		}
+	}
+}
+
+void ProcessIncomingMessage(proto::taskhud::TaskTable& taskTable)
+{
+	if (std::find(peerList.begin(), peerList.end(), taskTable.character()) != peerList.end())
+	{
+		return;
+	}
+
+	Character newCharacter(taskTable.character());
+	peerList.push_back(newCharacter.name);
 	
+	for (const auto& task : taskTable.tasks())
+	{
+		Task newTask(task.name());
+		for (const auto& objective : task.objectives())
+		{
+			Objective newObjective(
+				objective.objectivetext(),
+				objective.iscompleted(),
+				objective.progress(),
+				objective.required(),
+				objective.index()
+			);
+			newTask.addObjective(newObjective);
+		}
+		newCharacter.addTask(newTask);
+	}
+	fullTaskTable.push_back(newCharacter);
+	std::sort(fullTaskTable.begin(), fullTaskTable.end(), [](const Character& a, const Character& b) {
+		return a.name < b.name;
+		});
+	CompareTasks();
 }
 
 void HandleMessage(const std::shared_ptr<postoffice::Message>& message)
@@ -146,51 +318,22 @@ void HandleMessage(const std::shared_ptr<postoffice::Message>& message)
 	{
 		proto::taskhud::TaskHud taskHudMessage;
 		taskHudMessage.ParseFromString(*message->Payload);
-		
+
 		switch (taskHudMessage.id())
 		{
 		case proto::taskhud::Request:
 		{
-			WriteChatf(PLUGIN_MSG "Received request message");
 			fullTaskTable.clear();
-			std::vector<Task> my_tasks = get_tasks();
-			send_tasks(my_tasks);
+			peerList.clear();
+			std::vector<Task> my_tasks = GetTasks();
+			SendTasks(my_tasks);
 			break;
 		}
 		case proto::taskhud::Incoming:
 		{
-			WriteChatf(PLUGIN_MSG "Received incoming message");
-			Character character;
-			for (char* name : peerList) {
-				delete[] name;
-			}
-			if (taskHudMessage.has_tasktable())
-			{
-				const proto::taskhud::TaskTable& payload = taskHudMessage.tasktable();
-				std::string s_tmpCharName = payload.character();
-				character.name = s_tmpCharName;
-				char* copiedName = new char[s_tmpCharName.size() + 1];
-				std::strcpy(copiedName, s_tmpCharName.c_str());
-
-				peerList.push_back(copiedName);
-				for (const auto& protoTask : payload.tasks())
-				{
-					Task tmpTask;
-					strncpy_s(tmpTask.name, protoTask.name().c_str(), MAX_STRING); 
-
-					for (const auto& protoObjective : protoTask.objectives())
-					{
-						Objective tmpObjective;
-						strncpy_s(tmpObjective.objectiveText, protoObjective.objectivetext().c_str(), MAX_STRING);
-						tmpObjective.isCompleted = protoObjective.iscompleted();
-						tmpObjective.progress = protoObjective.progress();
-						tmpObjective.index = protoObjective.objindex();
-						tmpTask.addObjective(tmpObjective);
-					}
-					character.addTask(tmpTask);
-				}
-			}
-			fullTaskTable.push_back(character);
+			proto::taskhud::TaskTable taskTable;
+			taskTable.ParseFromString(taskHudMessage.payload());
+			ProcessIncomingMessage(taskTable);
 			break;
 		}
 		default:
@@ -201,6 +344,80 @@ void HandleMessage(const std::shared_ptr<postoffice::Message>& message)
 	}
 }
 
+void DrawTaskCombo(int i_chrIdx)
+{
+	Character character = fullTaskTable[i_chrIdx];
+	if (i_selectedTaskIndex + 1 > fullTaskTable[i_chrIdx].tasks.size())
+	{
+		i_selectedTaskIndex = 0;
+	}
+	if (ImGui::BeginCombo("##Task", character.tasks[i_selectedTaskIndex].name.c_str()))
+	{
+		for (int i = 0; i < character.tasks.size(); ++i)
+		{
+			bool isSelected = (i_selectedTaskIndex == i);
+			if (ImGui::Selectable(character.tasks[i].name.c_str(), isSelected))
+			{
+				i_selectedTaskIndex = i;
+			}
+			if (isSelected)
+			{
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+	}
+}
+
+std::vector<std::string> FindCharacterMissingTask(int i_chrIdx, const std::string& selectedTaskName)
+{
+	std::vector<std::string> charactersWithoutTask;
+
+	for (size_t i = 0; i < fullTaskTable.size(); ++i)
+	{
+		if (i == i_chrIdx || fullTaskTable.empty())
+		{
+			continue;
+		}
+		const auto& character = fullTaskTable[i];
+		bool b_taskFound = false;
+
+		for (const auto& task : character.tasks)
+		{
+			if (task.name == selectedTaskName) {
+				b_taskFound = true;
+				break;
+			}
+		}
+
+		if (!b_taskFound)
+		{
+			charactersWithoutTask.push_back(character.name);
+		}
+	}
+	return charactersWithoutTask;
+}
+
+void DrawMissingCharacters(int i_chrIdx)
+{
+	const std::string selectedTaskName = fullTaskTable[i_chrIdx].tasks[i_selectedTaskIndex].name;
+	std::vector<std::string> charactersWithoutTask = FindCharacterMissingTask(i_chrIdx, selectedTaskName);
+	if (!charactersWithoutTask.empty())
+	{
+		ImGui::SeparatorText("Missing this task");
+		for (size_t i = 0; i < charactersWithoutTask.size(); ++i)
+		{
+			std::string displayName = b_anonMode ? AnonymizeName(charactersWithoutTask[i]) : charactersWithoutTask[i];
+			ImGui::Text("%s", displayName.c_str());
+			if (i < charactersWithoutTask.size() - 1)
+			{
+				ImGui::SameLine();
+				ImGui::Text(ICON_MD_REMOVE);
+				ImGui::SameLine();
+			}
+		}
+	}
+}
 
 /**
  * @fn InitializePlugin
@@ -211,9 +428,7 @@ void HandleMessage(const std::shared_ptr<postoffice::Message>& message)
 PLUGIN_API void InitializePlugin()
 {
 	DebugSpewAlways("MQTaskHud::Initializing version %f", MQ2Version);
-	WriteChatf(PLUGIN_MSG "About to create dropbox");
 	THDropbox = postoffice::AddActor("taskhud", HandleMessage);
-	WriteChatf(PLUGIN_MSG "created dropbox");
 	AddCommand("/th", TH_Cmd, false, true, true);
 	// AddXMLFile("MQUI_MyXMLFile.xml");
 	// AddMQ2Data("mytlo", MyTLOData);
@@ -234,308 +449,238 @@ PLUGIN_API void ShutdownPlugin()
 	// RemoveMQ2Data("mytlo");
 }
 
-/**
- * @fn SetGameState
- *
- * This is called when the GameState changes.  It is also called once after the
- * plugin is initialized.
- *
- * For a list of known GameState values, see the constants that begin with
- * GAMESTATE_.  The most commonly used of these is GAMESTATE_INGAME.
- *
- * When zoning, this is called once after @ref OnBeginZone @ref OnRemoveSpawn
- * and @ref OnRemoveGroundItem are all done and then called once again after
- * @ref OnEndZone and @ref OnAddSpawn are done but prior to @ref OnAddGroundItem
- * and @ref OnZoned
- *
- * @param GameState int - The value of GameState at the time of the call
- */
-PLUGIN_API void SetGameState(int GameState)
+void DrawComboBoxes()
 {
-	//DebugSpewAlways("MQTaskHud::SetGameState(%d)", GameState);
-}
-
-
-/**
- * @fn OnPulse
- *
- * This is called each time MQ2 goes through its heartbeat (pulse) function.
- *
- * Because this happens very frequently, it is recommended to have a timer or
- * counter at the start of this call to limit the amount of times the code in
- * this section is executed.
- */
-PLUGIN_API void OnPulse()
-{
-/*
-	static std::chrono::steady_clock::time_point PulseTimer = std::chrono::steady_clock::now();
-	// Run only after timer is up
-	if (std::chrono::steady_clock::now() > PulseTimer)
+	ImGui::SetNextItemWidth(100);
+	std::string displayedName = b_anonMode ? AnonymizeName(fullTaskTable[i_selectedCharIndex].name) : fullTaskTable[i_selectedCharIndex].name;
+	if (ImGui::BeginCombo("CharacterSelect", displayedName.c_str()))
 	{
-		// Wait 5 seconds before running again
-		PulseTimer = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-		DebugSpewAlways("MQTaskHud::OnPulse()");
-	}
-*/
-}
-
-/**
- * @fn OnWriteChatColor
- *
- * This is called each time WriteChatColor is called (whether by MQ2Main or by any
- * plugin).  This can be considered the "when outputting text from MQ" callback.
- *
- * This ignores filters on display, so if they are needed either implement them in
- * this section or see @ref OnIncomingChat where filters are already handled.
- *
- * If CEverQuest::dsp_chat is not called, and events are required, they'll need to
- * be implemented here as well.  Otherwise, see @ref OnIncomingChat where that is
- * already handled.
- *
- * For a list of Color values, see the constants for USERCOLOR_.  The default is
- * USERCOLOR_DEFAULT.
- *
- * @param Line const char* - The line that was passed to WriteChatColor
- * @param Color int - The type of chat text this is to be sent as
- * @param Filter int - (default 0)
- */
-PLUGIN_API void OnWriteChatColor(const char* Line, int Color, int Filter)
-{
-	// DebugSpewAlways("MQTaskHud::OnWriteChatColor(%s, %d, %d)", Line, Color, Filter);
-}
-
-/**
- * @fn OnIncomingChat
- *
- * This is called each time a line of chat is shown.  It occurs after MQ filters
- * and chat events have been handled.  If you need to know when MQ2 has sent chat,
- * consider using @ref OnWriteChatColor instead.
- *
- * For a list of Color values, see the constants for USERCOLOR_. The default is
- * USERCOLOR_DEFAULT.
- *
- * @param Line const char* - The line of text that was shown
- * @param Color int - The type of chat text this was sent as
- *
- * @return bool - Whether to filter this chat from display
- */
-PLUGIN_API bool OnIncomingChat(const char* Line, DWORD Color)
-{
-	// DebugSpewAlways("MQTaskHud::OnIncomingChat(%s, %d)", Line, Color);
-	return false;
-}
-
-/**
- * @fn OnAddSpawn
- *
- * This is called each time a spawn is added to a zone (ie, something spawns). It is
- * also called for each existing spawn when a plugin first initializes.
- *
- * When zoning, this is called for all spawns in the zone after @ref OnEndZone is
- * called and before @ref OnZoned is called.
- *
- * @param pNewSpawn PSPAWNINFO - The spawn that was added
- */
-PLUGIN_API void OnAddSpawn(PSPAWNINFO pNewSpawn)
-{
-	// DebugSpewAlways("MQTaskHud::OnAddSpawn(%s)", pNewSpawn->Name);
-}
-
-/**
- * @fn OnRemoveSpawn
- *
- * This is called each time a spawn is removed from a zone (ie, something despawns
- * or is killed).  It is NOT called when a plugin shuts down.
- *
- * When zoning, this is called for all spawns in the zone after @ref OnBeginZone is
- * called.
- *
- * @param pSpawn PSPAWNINFO - The spawn that was removed
- */
-PLUGIN_API void OnRemoveSpawn(PSPAWNINFO pSpawn)
-{
-	// DebugSpewAlways("MQTaskHud::OnRemoveSpawn(%s)", pSpawn->Name);
-}
-
-/**
- * @fn OnAddGroundItem
- *
- * This is called each time a ground item is added to a zone (ie, something spawns).
- * It is also called for each existing ground item when a plugin first initializes.
- *
- * When zoning, this is called for all ground items in the zone after @ref OnEndZone
- * is called and before @ref OnZoned is called.
- *
- * @param pNewGroundItem PGROUNDITEM - The ground item that was added
- */
-PLUGIN_API void OnAddGroundItem(PGROUNDITEM pNewGroundItem)
-{
-	// DebugSpewAlways("MQTaskHud::OnAddGroundItem(%d)", pNewGroundItem->DropID);
-}
-
-/**
- * @fn OnRemoveGroundItem
- *
- * This is called each time a ground item is removed from a zone (ie, something
- * despawns or is picked up).  It is NOT called when a plugin shuts down.
- *
- * When zoning, this is called for all ground items in the zone after
- * @ref OnBeginZone is called.
- *
- * @param pGroundItem PGROUNDITEM - The ground item that was removed
- */
-PLUGIN_API void OnRemoveGroundItem(PGROUNDITEM pGroundItem)
-{
-	// DebugSpewAlways("MQTaskHud::OnRemoveGroundItem(%d)", pGroundItem->DropID);
-}
-
-/**
- * @fn OnBeginZone
- *
- * This is called just after entering a zone line and as the loading screen appears.
- */
-PLUGIN_API void OnBeginZone()
-{
-	// DebugSpewAlways("MQTaskHud::OnBeginZone()");
-}
-
-/**
- * @fn OnEndZone
- *
- * This is called just after the loading screen, but prior to the zone being fully
- * loaded.
- *
- * This should occur before @ref OnAddSpawn and @ref OnAddGroundItem are called. It
- * always occurs before @ref OnZoned is called.
- */
-PLUGIN_API void OnEndZone()
-{
-	// DebugSpewAlways("MQTaskHud::OnEndZone()");
-}
-
-/**
- * @fn OnZoned
- *
- * This is called after entering a new zone and the zone is considered "loaded."
- *
- * It occurs after @ref OnEndZone @ref OnAddSpawn and @ref OnAddGroundItem have
- * been called.
- */
-PLUGIN_API void OnZoned()
-{
-	// DebugSpewAlways("MQTaskHud::OnZoned()");
-}
-
-
-void ShowTaskDetails()
-{
-
-}
-
-/**
- * @fn OnUpdateImGui
- *
- * This is called each time that the ImGui Overlay is rendered. Use this to render
- * and update plugin specific widgets.
- *
- * Because this happens extremely frequently, it is recommended to move any actual
- * work to a separate call and use this only for updating the display.
- */
-PLUGIN_API void OnUpdateImGui()
-{
-
-	if (GetGameState() == GAMESTATE_INGAME)
-	{
-		if (b_showMQTaskHudWindow)
+		for (size_t i = 0; i < fullTaskTable.size(); ++i)
 		{
-			ImGui::SetNextWindowSize(ImVec2(FIRST_WINDOW_WIDTH, FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
-			if (ImGui::Begin("Task HUD", &b_showMQTaskHudWindow, ImGuiWindowFlags_None)) 
+			const bool is_selected = (i == i_selectedCharIndex);
+			std::string displayedName = b_anonMode ? AnonymizeName(fullTaskTable[i].name.c_str()) : fullTaskTable[i].name.c_str();
+			if (ImGui::Selectable(displayedName.c_str(), is_selected))
 			{
-				ImGui::SetNextItemWidth(100);
-				ImGui::Combo("##Character Select", &i_selectedCharIndex, peerList.data(), peerList.size());
-				if (ImGui::IsItemHovered())
-				{
-					ImGui::SetTooltip("Selected character");
-				}
-				ImGui::SameLine();
-				ImGui::SetNextItemWidth(100);
-				ImGui::Combo("##Peer type", &i_selectedPeerIndex, peerType.data(), peerType.size());
-				if (ImGui::IsItemHovered())
-				{
-					ImGui::SetTooltip("Peer set");
-				}
-				ImGui::SameLine();
-				if (ImGui::SmallButton(ICON_MD_REFRESH)) {
-					//triggers.do_refresh = true;
-				}
-				if (ImGui::IsItemHovered())
-				{
-					ImGui::SetTooltip("Refresh tasks");
-				}
-				// Display tasks and objectives
-				ShowTaskDetails();
+				i_selectedCharIndex = i;
 			}
-			ImGui::End();
+			if (is_selected)
+			{
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+	}
+
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(100);
+	if (ImGui::BeginCombo("##Peer Group Select", peerType[i_selectedPeerIndex].c_str()))
+	{
+		for (size_t i = 0; i < peerType.size(); ++i)
+		{
+			bool isGroupSelected = (i_selectedPeerIndex == i);
+			if (ImGui::Selectable(peerType[i].c_str(), isGroupSelected))
+			{
+				i_selectedPeerIndex = i;
+			}
+			if (isGroupSelected)
+			{
+				ImGui::SetItemDefaultFocus();
+			}
+		}
+		ImGui::EndCombo();
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip("Peer group selection");
+		}
+	}
+	
+	ImGui::SameLine();
+	if (ImGui::SmallButton(ICON_MD_REFRESH))
+	{
+		RequestTasks();
+	}
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip("Refresh tasks");
+	}
+
+	if (!fullTaskTable.empty() && i_selectedCharIndex < fullTaskTable.size())
+	{
+		const Character& selectedCharacter = fullTaskTable[i_selectedCharIndex];
+		if (i_selectedTaskIndex > selectedCharacter.tasks.size())
+		{
+			i_selectedTaskIndex = 1;
+		}
+		if (ImGui::BeginCombo("##Task Select", selectedCharacter.tasks[i_selectedTaskIndex].name.c_str()))
+		{
+			for (size_t i = 0; i < selectedCharacter.tasks.size(); ++i)
+			{
+				bool isTaskSelected = (i_selectedTaskIndex == i);
+				if (ImGui::Selectable(selectedCharacter.tasks[i].name.c_str(), isTaskSelected))
+				{
+					i_selectedTaskIndex = i;
+				}
+			}
+			ImGui::EndCombo();
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Task selection");
+			}
 		}
 	}
 
 }
 
-/**
- * @fn OnMacroStart
- *
- * This is called each time a macro starts (ex: /mac somemacro.mac), prior to
- * launching the macro.
- *
- * @param Name const char* - The name of the macro that was launched
- */
-PLUGIN_API void OnMacroStart(const char* Name)
+void DrawCharactersMissingTask(const Task& selectedTask)
 {
-	// DebugSpewAlways("MQTaskHud::OnMacroStart(%s)", Name);
+	if (!selectedTask.missingList.empty())
+	{
+		ImGui::SeparatorText("Characters missing this task");
+		for (size_t i = 0; i < selectedTask.missingList.size(); ++i)
+		{
+			std::string displayedName = b_anonMode ? AnonymizeName(selectedTask.missingList[i].c_str()) : selectedTask.missingList[i].c_str();
+			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%s", displayedName.c_str());
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Bring %s to foreground", displayedName.c_str());
+				if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+				{
+					char command[256];
+					snprintf(command, sizeof(command), "/dex %s /foreground", selectedTask.missingList[i].c_str());
+					DoCommand(command);
+				}
+			}
+			if (i < selectedTask.missingList.size() - 1)
+			{
+				ImGui::SameLine();
+				ImGui::Text(ICON_MD_REMOVE);
+				ImGui::SameLine();
+			}
+		}
+		
+	}
 }
 
-/**
- * @fn OnMacroStop
- *
- * This is called each time a macro stops (ex: /endmac), after the macro has ended.
- *
- * @param Name const char* - The name of the macro that was stopped.
- */
-PLUGIN_API void OnMacroStop(const char* Name)
+void DrawCharsMissingObj(const Objective& objective)
 {
-	// DebugSpewAlways("MQTaskHud::OnMacroStop(%s)", Name);
+	if (!objective.objectiveDifferences.empty())
+	{
+		for (const auto& diffPair : objective.objectiveDifferences)
+		{
+			const std::vector<ObjectiveDifference>& diffs = diffPair.second;
+
+			for (size_t i = 0; i < diffs.size(); ++i) {
+				const auto& diff = diffs[i];
+				std::string displayedName = b_anonMode ? AnonymizeName(diff.characterName) : diff.characterName;
+
+				ImVec4 color = diff.isAhead ? ImVec4(0.0f, 1.0f, 0.0f, 1.0f) : ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+
+				ImGui::TextColored(color, "%s", displayedName.c_str());
+				
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::SetTooltip("Bring %s to foreground", displayedName.c_str());
+					if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+					{
+						char command[256];
+						snprintf(command, sizeof(command), "/dex %s /foreground", diff.characterName.c_str());
+						DoCommand(command);
+					}
+				}
+
+				if (i != diffs.size() - 1) {
+					ImGui::SameLine();
+					ImGui::Text(ICON_MD_REMOVE);
+					ImGui::SameLine();
+				}
+			}
+		}
+	}
 }
 
-/**
- * @fn OnLoadPlugin
- *
- * This is called each time a plugin is loaded (ex: /plugin someplugin), after the
- * plugin has been loaded and any associated -AutoExec.cfg file has been launched.
- * This means it will be executed after the plugin's @ref InitializePlugin callback.
- *
- * This is also called when THIS plugin is loaded, but initialization tasks should
- * still be done in @ref InitializePlugin.
- *
- * @param Name const char* - The name of the plugin that was loaded
- */
-PLUGIN_API void OnLoadPlugin(const char* Name)
+void DrawTaskDetails(const Task& selectedTask)
 {
-	// DebugSpewAlways("MQTaskHud::OnLoadPlugin(%s)", Name);
+	ImGui::Separator();
+	if (ImGui::BeginTable("##Objective Table", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
+	{
+		for (const Objective& objective : selectedTask.objectives)
+		{
+			ImGui::TableNextColumn();
+			ImGui::Text(objective.objectiveText.c_str());
+			ImGui::TableNextColumn();
+			if (objective.isCompleted)
+			{
+				ImGui::TextColored(ImVec4(0, 255, 0, 255), "Done");
+			}
+			else
+			{
+				if (objective.progress != -1 && objective.required != -1)
+				{
+					ImGui::Text("%d/%d", objective.progress, objective.required);
+				}
+			}
+			ImGui::TableNextColumn();
+			DrawCharsMissingObj(objective);
+			ImGui::TableNextRow();
+		}
+		ImGui::EndTable();
+	}
 }
 
-/**
- * @fn OnUnloadPlugin
- *
- * This is called each time a plugin is unloaded (ex: /plugin someplugin unload),
- * just prior to the plugin unloading.  This means it will be executed prior to that
- * plugin's @ref ShutdownPlugin callback.
- *
- * This is also called when THIS plugin is unloaded, but shutdown tasks should still
- * be done in @ref ShutdownPlugin.
- *
- * @param Name const char* - The name of the plugin that is to be unloaded
- */
-PLUGIN_API void OnUnloadPlugin(const char* Name)
+void DrawTaskHud(const Task& selectedTask)
 {
-	// DebugSpewAlways("MQTaskHud::OnUnloadPlugin(%s)", Name);
+	ImGui::SetNextWindowSize(ImVec2(FIRST_WINDOW_WIDTH, FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
+	if (ImGui::Begin("Task HUD", &b_showMQTaskHudWindow, ImGuiWindowFlags_None))
+	{
+		DrawComboBoxes();
+		DrawCharactersMissingTask(selectedTask);
+		DrawTaskDetails(selectedTask);
+		ImGui::EndTabItem();
+	}
+
+	ImGui::End();
 }
+
+PLUGIN_API void OnUpdateImGui()
+{
+	if (GetGameState() == GAMESTATE_INGAME && b_showMQTaskHudWindow)
+	{
+		if (!fullTaskTable.empty())
+		{
+			if (i_selectedCharIndex >= fullTaskTable.size())
+			{
+				ImGui::SetNextWindowSize(ImVec2(FIRST_WINDOW_WIDTH, FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
+				if (ImGui::Begin("Task HUD", &b_showMQTaskHudWindow, ImGuiWindowFlags_None))
+				{
+					ImGui::Text("Updating data.");
+					ImGui::End();
+					return;
+				}
+
+				ImGui::End();
+			}
+			Character& selectedCharacter = fullTaskTable[i_selectedCharIndex];
+			if (i_selectedTaskIndex < selectedCharacter.tasks.size())
+			{
+				Task& selectedTask = selectedCharacter.tasks[i_selectedTaskIndex];
+				DrawTaskHud(selectedTask);
+			}
+		}
+	}	
+}
+
+PLUGIN_API bool OnIncomingChat(const char* Line, DWORD Color)
+{
+	if (strstr(Line, "Your task") && strstr(Line, "has been updated"))
+	{
+		RequestTasks();
+	}
+	else if (strstr(Line, "You have been assigned the task"))
+	{
+		RequestTasks();
+	}
+
+	// DebugSpewAlways("MQtest::OnIncomingChat(%s, %d)", Line, Color);
+	return false;
+}
+

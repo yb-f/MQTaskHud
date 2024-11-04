@@ -9,14 +9,19 @@ enum MessageId {
 
 message TaskHud {
 	MessageId id = 1;
-	optional TaskTable TaskTable = 2;
+	optional bytes payload = 2;
+}
+
+message RequestMessage {
+	string reqChar = 1;
 }
 
 message Objective {
     string objectiveText = 1;
     bool isCompleted = 2;
     int32 progress = 3;
-	int32 objIndex = 4;
+	int32 required = 4;
+	int32 index = 5;
 }
 
 message Task {
