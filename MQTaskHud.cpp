@@ -476,7 +476,9 @@ PLUGIN_API bool OnIncomingChat(const char* Line, DWORD Color)
 
 PLUGIN_API void OnPulse()
 {
-	static std::chrono::steady_clock::time_point PulseTimer = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+	if (GetGameState() == GAMESTATE_INGAME)
+	{
+		static std::chrono::steady_clock::time_point PulseTimer = std::chrono::steady_clock::now() + std::chrono::seconds(1);
 		// Run only after timer is up
 		if (std::chrono::steady_clock::now() >= PulseTimer)
 		{
@@ -484,6 +486,7 @@ PLUGIN_API void OnPulse()
 			//DebugSpewAlways("MQtest::OnPulse()");
 			doHeartbeat();
 		}
+	}
 }
 
 PLUGIN_API void OnBeginZone()
