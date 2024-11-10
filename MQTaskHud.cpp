@@ -203,7 +203,7 @@ std::vector<Task> getTasks()
 				{
 					tmpTask.addObjective(Objective(szTemp, false, -1, -1, j));
 				}
-				else if (strcmp(szTemp, "ERROR: String not found. (0)") == 0)
+				else if ((strcmp(szTemp, "ERROR: String not found. (0)") == 0) || (strcmp(szTemp, "ERROR: String not found. (2146435071)") == 0))
 				{
 					continue;
 				}
