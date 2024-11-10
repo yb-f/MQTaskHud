@@ -400,6 +400,8 @@ PLUGIN_API void InitializePlugin()
 	{
 		MessageHandler::sendHeartbeatMessages(HeartbeatType::Register);
 	}
+	WriteChatf(PLUGIN_MSG "Welcome to Task HUD!");
+	WriteChatf(PLUGIN_MSG "Use \ay/th help\aw to show help or \ay/th show\aw to show the UI.");
 	// AddXMLFile("MQUI_MyXMLFile.xml");
 	// AddMQ2Data("mytlo", MyTLOData);
 }
