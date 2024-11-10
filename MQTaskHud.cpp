@@ -1,169 +1,195 @@
 // MQTaskHud.cpp : Defines the entry point for the DLL application.
 //
-
-// PLUGIN_API is only to be used for callbacks.  All existing callbacks at this time
-// are shown below. Remove the ones your plugin does not use.  Always use Initialize
-// and Shutdown for setup and cleanup.
+//
 
 #include <mq/Plugin.h>
 #include "mq/api/ActorAPI.h"
-#include "imgui/fonts/IconsMaterialDesign.h"
 #include "MQTaskHud.h"
-
+#include "MessageHandler.h"
 
 PreSetup("MQTaskHud");
 PLUGIN_VERSION(0.1);
 
-const int FIRST_WINDOW_WIDTH = 445;
-const int FIRST_WINDOW_HEIGHT = 490;
-
+TaskTable taskTable;
 postoffice::DropboxAPI THDropbox;
 
-bool b_showMQTaskHudWindow = false;
-bool b_anonMode = false;
-int i_selectedCharIndex = 0;
-int i_selectedPeerIndex = 0;
-int i_selectedTaskIndex = 0;
-
-std::vector<std::string> peerList = { };
-
-const std::vector<std::string> peerType = { "Group", "Zone", "All" };
-
-std::vector<Character> fullTaskTable;
-
-std::string AnonymizeName(const std::string& name)
+void dumpObjectives(const Task& task)
 {
-	if (name.empty()) return name;
-	return std::string(1, name.front()) + "***" + std::string(1, name.back());
-}
-
-void PrintTaskTable()
-{
-	if (fullTaskTable.empty())
+	for (const auto& objective : task.getObjectives())
 	{
-		WriteChatf(PLUGIN_MSG "Table empty");
-	}
-	for (const auto& character : fullTaskTable) {
-		std::string displayedName = b_anonMode ? AnonymizeName(character.name) : character.name;
-		WriteChatf("Character: \ar%s\aw", displayedName.c_str());
-
-		for (const auto& task : character.tasks) {
-			WriteChatf("  Task: \ay%s\aw", task.name.c_str());
-
-			for (const auto& objective : task.objectives) {
-				WriteChatf("    Objective: \ag%s\aw - Complete: \ag%s\aw - Progress: \ag%d\aw - Required: \ag%d\aw Index: \ag%d\aw",
-					objective.objectiveText.c_str(),
-					objective.isCompleted ? "true" : "false",
-					objective.progress,
-					objective.required,
-					objective.index
-				);
-				if (!objective.objectiveDifferences.empty())
-				{
-					WriteChatf("      Objective Differences:");
-					for (const auto& diffPair : objective.objectiveDifferences)
-					{
-						const std::vector<ObjectiveDifference>& differences = diffPair.second;
-
-						for (const auto& diff : differences)
-						{
-							std::string displayedName = b_anonMode ? AnonymizeName(diff.characterName) : diff.characterName;
-							WriteChatf("        Character: \ar%s\aw - Is Ahead: \ag%s\aw",
-								displayedName.c_str(),
-								diff.isAhead ? "true" : "false"
-							);
-						}
-					}
-				}
-			}
-
-			if (!task.missingList.empty())
+		const auto& values = objective.getValues();
+		WriteChatf(PLUGIN_MSG "      Objective: \ag%s", values.objectiveText.c_str());
+		WriteChatf(PLUGIN_MSG "        Complete: \ag%s", values.isCompleted ? "true" : "false");
+		WriteChatf(PLUGIN_MSG "        Progress: \ag%d\aw/\ag%d", values.progress, values.required);
+		
+		if (objective.hasObjectiveDifferences())
+		{
+			WriteChatf(PLUGIN_MSG "        Differences:");
+			for (const auto& difference : objective.getAllDifferences())
 			{
-				WriteChatf("    Missing List:");
-				for (const auto& missing : task.missingList) {
-					std::string displayedMissingName = b_anonMode ? AnonymizeName(missing) : missing;
-					WriteChatf("      Character: \ar%s\aw", displayedMissingName.c_str());
-				}
+				WriteChatf(PLUGIN_MSG "          \ar%s\aw Equal: \ag%s \ar%s",
+					difference.getCharacterName(taskTable.anonMode).c_str(),
+					difference.isEqualProgress() ? "Yes" : "No",
+					difference.isObjAhead() ? "[Ahead]" : "[Behind]"
+				);
 			}
 		}
 	}
 }
 
-void RequestTasks()
+void dumpMissingList(const std::vector<std::string>& missingList) {
+	if (!missingList.empty())
+	{
+		std::string buffer = "      Missing List: \ag";
+		for (std::string missingName : missingList)
+		{ 
+			std::string displayedName;
+			if (taskTable.anonMode)
+			{
+				displayedName = std::string(1, missingName.front()) + "***" + std::string(1, missingName.back()) + " ";
+			}
+			displayedName = missingName + " ";
+			buffer += displayedName;
+		}
+		WriteChatf(PLUGIN_MSG "%s", buffer.c_str());
+	}
+}
+
+void dumpTaskTable()
 {
-	WriteChatf(PLUGIN_MSG "Request task function");
+	if (taskTable.isEmpty())
+	{
+		WriteChatf(PLUGIN_MSG "Table empty");
+		return;
+	}
+
+	for (auto& character : taskTable.getCharacters())
+	{
+		WriteChatf(PLUGIN_MSG "Character: \ar%s\aw(\ag%d\aw)", character.getCharName(taskTable.anonMode).c_str(), character.getId());
+		WriteChatf(PLUGIN_MSG "  Group Leader: \ag%s\aw", character.getGroupLeaderName(taskTable.anonMode).c_str());
+
+		for (auto& task : character.getTasks())
+		{
+			WriteChatf(PLUGIN_MSG "    Task: \ay%s\aw(\ag%llu\aw)", task.getTaskName().c_str(), task.getUid());
+
+			dumpObjectives(task);
+
+			dumpMissingList(task.getMissingList());
+		}
+	}
+
+}
+
+void dumpPeers()
+{
+	if (taskTable.getPeerCount() == 0)
+	{
+		WriteChatf(PLUGIN_MSG "Peer list empty");
+		return;
+	}
+	WriteChatf(PLUGIN_MSG "Peer List: ");
+	for (const auto& peer : taskTable.getPeers())
+	{
+		WriteChatf(PLUGIN_MSG "  Peer: \ag%s \aw(\ar%d\aw)", peer.getName(taskTable.anonMode).c_str(), peer.getId());
+		WriteChatf(PLUGIN_MSG "    Heartbeats missed: \ay%d", peer.getMissedHeartbeats());
+	}
+}
+
+void requestPeers()
+{
+	MessageHandler::sendHeartbeatMessages(HeartbeatType::Register);
+	if (taskTable.isRegistered == false)
+	{
+		taskTable.isRegistered = true;
+	}
+	
+}
+
+void requestTasks()
+{
 	postoffice::Address address;
-	address.Mailbox = "taskhud";
-	proto::taskhud::TaskHud message;
-	proto::taskhud::RequestMessage reqMsg;
+	proto::TaskHud::TaskHud message;
+	proto::TaskHud::RequestMessage reqMsg;
 	reqMsg.set_reqchar(pLocalPlayer->DisplayedName);
-	message.set_id(proto::taskhud::Request);
+	message.set_id(proto::TaskHud::Request);
 	message.set_payload(reqMsg.SerializeAsString());
 	THDropbox.Post(address, message);
 }
 
-void TH_Cmd(PlayerClient* pChar, char* szLine) {
-	char Arg[MAX_STRING] = { 0 };
-	GetMaybeQuotedArg(Arg, MAX_STRING, szLine, 1);
-	if (strlen(Arg)) {
-		if (ci_equals(Arg, "help")) {
+void thCmd(PlayerClient* pChar, char* szLine) {
+	char arg[MAX_STRING] = { 0 };
+	GetMaybeQuotedArg(arg, MAX_STRING, szLine, 1);
+	if (strlen(arg)) {
+		if (ci_equals(arg, "help")) {
 			WriteChatf(PLUGIN_MSG "\ar/th show    \ag--- Show UI");
 			WriteChatf(PLUGIN_MSG "\ar/th hide    \ag--- Hide UI");
 			WriteChatf(PLUGIN_MSG "\ar/th anon    \ag--- Anonymize character names");
 			WriteChatf(PLUGIN_MSG "\ar/th refresh \ag--- Refresh data");
 			return;
 		}
-		if (ci_equals(Arg, "show")) {
+		if (ci_equals(arg, "show")) {
 			WriteChatf(PLUGIN_MSG "Showing UI.");
-			if (fullTaskTable.empty())
+			if (taskTable.isEmpty())
 			{
-				RequestTasks();
+				requestTasks();
 			}
-			b_showMQTaskHudWindow = true;
+			taskTable.showTaskHudWindow = true;
 			return;
 		}
-		if (ci_equals(Arg, "hide")) {
+		if (ci_equals(arg, "hide")) {
 			WriteChatf(PLUGIN_MSG "Hiding UI.");
-			b_showMQTaskHudWindow = false;
+			taskTable.showTaskHudWindow = false;
 			return;
 		}
-		if (ci_equals(Arg, "anon"))
+		if (ci_equals(arg, "anon"))
 		{
-			WriteChatf(PLUGIN_MSG "Toggling anonymous mode \ar%s\ag.", b_anonMode ? "off" : "on");
-			b_anonMode = !b_anonMode;
+			WriteChatf(PLUGIN_MSG "Toggling anonymous mode \ar%s\ag.", taskTable.anonMode ? "off" : "on");
+			taskTable.anonMode = !taskTable.anonMode;
 			return;
 		}
-		if (ci_equals(Arg, "refresh"))
+		if (ci_equals(arg, "refresh"))
 		{
-			RequestTasks();
+			requestTasks();
 		}
-		if (ci_equals(Arg, "dumptable"))
+		if (ci_equals(arg, "refreshpeers"))
 		{
-			PrintTaskTable();
+			requestPeers();
+		}
+		if (ci_equals(arg, "dumptable"))
+		{
+			dumpTaskTable();
+		}
+		if (ci_equals(arg, "dumppeers"))
+		{
+			dumpPeers();
+		}
+		if (ci_equals(arg, "clearpeers"))
+		{
+			taskTable.clearPeerList();
+		}
+		if (ci_equals(arg, "cleartable"))
+		{
+			taskTable.clearAllCharacters();
+		}
+		if (ci_equals(arg, "clearall"))
+		{
+			taskTable.clearAllCharacters();
+			taskTable.clearPeerList();
 		}
 	}
 }
 
-int FindCharacterIndexByName(const std::vector<Character>& characters, const std::string& name)
+std::vector<Task> getTasks()
 {
-	auto it = std::find_if(characters.begin(), characters.end(), [&name](const Character& character) { return character.name == name; });
-	if (it != characters.end()) {
-		return std::distance(characters.begin(), it);
-	}
-	else
-	{
-		return -1;
-	}
-}
-
-std::vector<Task> GetTasks()
-{
+	//this is a vector of our Task class.
 	std::vector<Task> myTasks;
-	for (int i = 0; i <= MAX_QUEST_ENTRIES; ++i)
+	for (int i = 0; i < MAX_QUEST_ENTRIES; ++i)
 	{
+		//this is not of the Task class, this is the eqlib::CTaskEntry
 		const auto& task = pTaskManager->QuestEntries[i];
 		if (strlen(task.TaskTitle))
 		{
+			//this is a Task class object
 			Task tmpTask(task.TaskTitle);
 			auto taskStatus = pTaskManager->GetTaskStatus(pLocalPC, i, task.TaskSystem);
 			for (int j = 0; j < MAX_TASK_ELEMENTS; ++j)
@@ -196,144 +222,60 @@ std::vector<Task> GetTasks()
 	return myTasks;
 }
 
-void SendTasks(const std::vector<Task>& tasks)
-{
-	if (GetGameState() != GAMESTATE_INGAME)
-	{
-		return;
-	}
-	
-	proto::taskhud::TaskTable message;
-	WriteChatf(PLUGIN_MSG "Sending tasks now");
-	message.set_character(pLocalPlayer->DisplayedName);
-
-	for (const auto& task : tasks)
-	{
-		proto::taskhud::Task* protoTask = message.add_tasks();
-		protoTask->set_name(task.name);
-		for (const auto& objective : task.objectives)
-		{
-			proto::taskhud::Objective* protoObjective = protoTask->add_objectives();
-			protoObjective->set_objectivetext(objective.objectiveText);
-			protoObjective->set_iscompleted(objective.isCompleted);
-			protoObjective->set_progress(objective.progress);
-			protoObjective->set_required(objective.required);
-			protoObjective->set_index(objective.index);
-
-		}
-	}
-
-	postoffice::Address address;
-	address.Mailbox = "taskhud";
-	proto::taskhud::TaskHud payload;
-	payload.set_id(proto::taskhud::Incoming);
-	payload.set_payload(message.SerializeAsString());
-	THDropbox.Post(address, payload);
-}
-
-
-
-void CompareTasks()
-{
-	for (auto& currentCharacter : fullTaskTable)
-	{
-		for (auto& currentTask : currentCharacter.tasks)
-		{
-			currentTask.clearMissingList();
-
-			for (const auto& otherCharacter : fullTaskTable)
-			{
-				if (currentCharacter.name == otherCharacter.name)
-				{
-					continue;
-				}
-
-				bool taskFound = false;
-				for (const auto& otherTask : otherCharacter.tasks)
-				{
-					if (otherTask.name == currentTask.name)
-					{
-						taskFound = true;
-						for (auto& currentObjective : currentTask.objectives)
-						{
-							bool objectiveFound = false;
-							for (const auto& otherObjective : otherTask.objectives)
-							{
-								if (currentObjective.index == otherObjective.index)
-								{
-									objectiveFound = true;
-									currentObjective.compareWith(otherObjective, otherCharacter.name);
-									break;
-								}
-							}
-						}
-						break;
-					}
-				}
-				if (!taskFound)
-				{
-					currentTask.missingList.push_back(otherCharacter.name);
-				}
-			}
-		}
-	}
-}
-
-void ProcessIncomingMessage(proto::taskhud::TaskTable& taskTable)
-{
-	if (std::find(peerList.begin(), peerList.end(), taskTable.character()) != peerList.end())
-	{
-		return;
-	}
-
-	Character newCharacter(taskTable.character());
-	peerList.push_back(newCharacter.name);
-	
-	for (const auto& task : taskTable.tasks())
-	{
-		Task newTask(task.name());
-		for (const auto& objective : task.objectives())
-		{
-			Objective newObjective(
-				objective.objectivetext(),
-				objective.iscompleted(),
-				objective.progress(),
-				objective.required(),
-				objective.index()
-			);
-			newTask.addObjective(newObjective);
-		}
-		newCharacter.addTask(newTask);
-	}
-	fullTaskTable.push_back(newCharacter);
-	std::sort(fullTaskTable.begin(), fullTaskTable.end(), [](const Character& a, const Character& b) {
-		return a.name < b.name;
-		});
-	CompareTasks();
-}
-
-void HandleMessage(const std::shared_ptr<postoffice::Message>& message)
+void handleMessage(const std::shared_ptr<postoffice::Message>& message)
 {
 	if (message->Payload)
 	{
-		proto::taskhud::TaskHud taskHudMessage;
+		proto::TaskHud::TaskHud taskHudMessage;
 		taskHudMessage.ParseFromString(*message->Payload);
 
 		switch (taskHudMessage.id())
 		{
-		case proto::taskhud::Request:
+		case proto::TaskHud::Request:
 		{
-			fullTaskTable.clear();
-			peerList.clear();
-			std::vector<Task> my_tasks = GetTasks();
-			SendTasks(my_tasks);
+			MessageHandler::processRequestMessage();
 			break;
 		}
-		case proto::taskhud::Incoming:
+		case proto::TaskHud::Incoming:
 		{
-			proto::taskhud::TaskTable taskTable;
-			taskTable.ParseFromString(taskHudMessage.payload());
-			ProcessIncomingMessage(taskTable);
+			proto::TaskHud::TaskTable protoTaskTable;
+			protoTaskTable.ParseFromString(taskHudMessage.payload());
+			MessageHandler::processIncomingMessage(protoTaskTable);
+			break;
+		}
+		case proto::TaskHud::Register:
+		{
+			proto::TaskHud::HeartbeatMessages heartbeat;
+			heartbeat.ParseFromString(taskHudMessage.payload());
+			MessageHandler::processRegisterMessage(heartbeat);
+			break;
+		}
+		case proto::TaskHud::RegisterResponse:
+		{
+			proto::TaskHud::HeartbeatMessages heartbeat;
+			heartbeat.ParseFromString(taskHudMessage.payload());
+			MessageHandler::processRegisterResponseMessage(heartbeat);
+			break;
+		}
+		case proto::TaskHud::PauseHeartbeat:
+		{
+			proto::TaskHud::HeartbeatMessages heartbeat;
+			heartbeat.ParseFromString(taskHudMessage.payload());
+			MessageHandler::processPauseHeartbeatMessage(heartbeat);
+			break;
+		}
+		case proto::TaskHud::ResumeHeartbeat:
+		{
+			proto::TaskHud::HeartbeatMessages heartbeat;
+			heartbeat.ParseFromString(taskHudMessage.payload());
+			MessageHandler::processResumeHeartbeatMessage(heartbeat);
+			break;
+		}
+		case proto::TaskHud::Heartbeat:
+		{
+			proto::TaskHud::HeartbeatMessages heartbeat;
+			heartbeat.ParseFromString(taskHudMessage.payload());
+			MessageHandler::processHeartbeatMessage(heartbeat);
 			break;
 		}
 		default:
@@ -344,102 +286,121 @@ void HandleMessage(const std::shared_ptr<postoffice::Message>& message)
 	}
 }
 
-void DrawTaskCombo(int i_chrIdx)
+std::pair<bool, bool> compareObjectives(const Objective& objA, const Objective& objB)
 {
-	Character character = fullTaskTable[i_chrIdx];
-	if (i_selectedTaskIndex + 1 > fullTaskTable[i_chrIdx].tasks.size())
-	{
-		i_selectedTaskIndex = 0;
+	bool equal = false;
+	bool isAheadA = false;
+	auto valA = objA.getValues();
+	auto valB = objB.getValues();
+	if (valA.isCompleted && valB.isCompleted) {
+		equal = true;
 	}
-	if (ImGui::BeginCombo("##Task", character.tasks[i_selectedTaskIndex].name.c_str()))
-	{
-		for (int i = 0; i < character.tasks.size(); ++i)
-		{
-			bool isSelected = (i_selectedTaskIndex == i);
-			if (ImGui::Selectable(character.tasks[i].name.c_str(), isSelected))
-			{
-				i_selectedTaskIndex = i;
-			}
-			if (isSelected)
-			{
-				ImGui::SetItemDefaultFocus();
-			}
-		}
-		ImGui::EndCombo();
+	else if (valA.isCompleted && !valB.isCompleted) {
+		isAheadA = true;
 	}
+	else if (!valA.isCompleted && valB.isCompleted) {
+		equal = false;
+	}
+	else {
+		equal = valA.progress == valB.progress;
+		isAheadA = valA.progress > valB.progress;
+	}
+	return { equal, isAheadA };
 }
 
-std::vector<std::string> FindCharacterMissingTask(int i_chrIdx, const std::string& selectedTaskName)
+void compareCharacterTasks(Character& characterA, Character& characterB)
 {
-	std::vector<std::string> charactersWithoutTask;
-
-	for (size_t i = 0; i < fullTaskTable.size(); ++i)
+	auto& tasksA = characterA.getTasks();
+	auto& tasksB = characterB.getTasks();
+	for (auto& taskA : tasksA)
 	{
-		if (i == i_chrIdx || fullTaskTable.empty())
+		bool hasTask = false;
+		for (auto& taskB : tasksB)
 		{
-			continue;
-		}
-		const auto& character = fullTaskTable[i];
-		bool b_taskFound = false;
-
-		for (const auto& task : character.tasks)
-		{
-			if (task.name == selectedTaskName) {
-				b_taskFound = true;
-				break;
-			}
-		}
-
-		if (!b_taskFound)
-		{
-			charactersWithoutTask.push_back(character.name);
-		}
-	}
-	return charactersWithoutTask;
-}
-
-void DrawMissingCharacters(int i_chrIdx)
-{
-	const std::string selectedTaskName = fullTaskTable[i_chrIdx].tasks[i_selectedTaskIndex].name;
-	std::vector<std::string> charactersWithoutTask = FindCharacterMissingTask(i_chrIdx, selectedTaskName);
-	if (!charactersWithoutTask.empty())
-	{
-		ImGui::SeparatorText("Missing this task");
-		for (size_t i = 0; i < charactersWithoutTask.size(); ++i)
-		{
-			std::string displayName = b_anonMode ? AnonymizeName(charactersWithoutTask[i]) : charactersWithoutTask[i];
-			ImGui::Text("%s", displayName.c_str());
-			if (i < charactersWithoutTask.size() - 1)
+			if (taskA.getUid() == taskB.getUid())
 			{
-				ImGui::SameLine();
-				ImGui::Text(ICON_MD_REMOVE);
-				ImGui::SameLine();
+				hasTask = true;
+
+				//Compare objectives in the task
+				auto& objectivesA = taskA.getObjectives();
+				auto& objectivesB = taskB.getObjectives();
+
+				for (auto& objA : objectivesA)
+				{
+					std::vector<ObjectiveDifference> objDiffs;
+					for (auto& objB :objectivesB)
+					{
+						if (objA.getIndex() == objB.getIndex())
+						{
+							auto [equal, isAheadA] = compareObjectives(objA, objB);
+							if (equal) {
+								// tasks are equal, set equal to true for both characters
+								objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), true, false, characterB.getCharName()));
+							}
+							else if (isAheadA) {
+								// A is ahead, so set isAhead to true in A, false in B
+								objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), false, true, characterB.getCharName()));
+							}
+							else {
+								// B is ahead, so false in A, true in B
+								objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), false, false, characterB.getCharName()));
+							}
+						}
+					}
+				}
 			}
+		}
+		if (!hasTask)
+		{
+			taskA.addToMissingList(characterB.getCharName());
 		}
 	}
 }
 
-/**
- * @fn InitializePlugin
- *
- * This is called once on plugin initialization and can be considered the startup
- * routine for the plugin.
- */
+void compareTasks()
+{
+	auto& characters = taskTable.getCharacters();
+
+	for (auto& characterA : characters)
+	{
+		for (auto& characterB : characters)
+		{
+			if (&characterA != &characterB)
+			{
+				compareCharacterTasks(characterA, characterB);
+			}
+		}
+	}
+
+}
+
+void doHeartbeat()
+{
+	MessageHandler::sendHeartbeatMessages(HeartbeatType::Heartbeat);
+
+	for (auto& peer : taskTable.getPeers())
+	{
+		peer.incrementHeartbeats();
+		if (peer.getMissedHeartbeats() >= 6)
+		{
+			taskTable.removePeerById(peer.getId());
+		}
+	}
+}
+
 PLUGIN_API void InitializePlugin()
 {
 	DebugSpewAlways("MQTaskHud::Initializing version %f", MQ2Version);
-	THDropbox = postoffice::AddActor("taskhud", HandleMessage);
-	AddCommand("/th", TH_Cmd, false, true, true);
+	AddCommand("/th", thCmd, false, true, true);
+	THDropbox = postoffice::AddActor(handleMessage);
+	if (GetGameState() == GAMESTATE_INGAME)
+	{
+		MessageHandler::sendHeartbeatMessages(HeartbeatType::Register);
+	}
 	// AddXMLFile("MQUI_MyXMLFile.xml");
 	// AddMQ2Data("mytlo", MyTLOData);
 }
 
-/**
- * @fn ShutdownPlugin
- *
- * This is called once when the plugin has been asked to shutdown.  The plugin has
- * not actually shut down until this completes.
- */
 PLUGIN_API void ShutdownPlugin()
 {
 	DebugSpewAlways("MQTaskHud::Shutting down");
@@ -449,238 +410,90 @@ PLUGIN_API void ShutdownPlugin()
 	// RemoveMQ2Data("mytlo");
 }
 
-void DrawComboBoxes()
-{
-	ImGui::SetNextItemWidth(100);
-	std::string displayedName = b_anonMode ? AnonymizeName(fullTaskTable[i_selectedCharIndex].name) : fullTaskTable[i_selectedCharIndex].name;
-	if (ImGui::BeginCombo("CharacterSelect", displayedName.c_str()))
-	{
-		for (size_t i = 0; i < fullTaskTable.size(); ++i)
-		{
-			const bool is_selected = (i == i_selectedCharIndex);
-			std::string displayedName = b_anonMode ? AnonymizeName(fullTaskTable[i].name.c_str()) : fullTaskTable[i].name.c_str();
-			if (ImGui::Selectable(displayedName.c_str(), is_selected))
-			{
-				i_selectedCharIndex = i;
-			}
-			if (is_selected)
-			{
-				ImGui::SetItemDefaultFocus();
-			}
-		}
-		ImGui::EndCombo();
-	}
-
-	ImGui::SameLine();
-	ImGui::SetNextItemWidth(100);
-	if (ImGui::BeginCombo("##Peer Group Select", peerType[i_selectedPeerIndex].c_str()))
-	{
-		for (size_t i = 0; i < peerType.size(); ++i)
-		{
-			bool isGroupSelected = (i_selectedPeerIndex == i);
-			if (ImGui::Selectable(peerType[i].c_str(), isGroupSelected))
-			{
-				i_selectedPeerIndex = i;
-			}
-			if (isGroupSelected)
-			{
-				ImGui::SetItemDefaultFocus();
-			}
-		}
-		ImGui::EndCombo();
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::SetTooltip("Peer group selection");
-		}
-	}
-	
-	ImGui::SameLine();
-	if (ImGui::SmallButton(ICON_MD_REFRESH))
-	{
-		RequestTasks();
-	}
-	if (ImGui::IsItemHovered())
-	{
-		ImGui::SetTooltip("Refresh tasks");
-	}
-
-	if (!fullTaskTable.empty() && i_selectedCharIndex < fullTaskTable.size())
-	{
-		const Character& selectedCharacter = fullTaskTable[i_selectedCharIndex];
-		if (i_selectedTaskIndex > selectedCharacter.tasks.size())
-		{
-			i_selectedTaskIndex = 1;
-		}
-		if (ImGui::BeginCombo("##Task Select", selectedCharacter.tasks[i_selectedTaskIndex].name.c_str()))
-		{
-			for (size_t i = 0; i < selectedCharacter.tasks.size(); ++i)
-			{
-				bool isTaskSelected = (i_selectedTaskIndex == i);
-				if (ImGui::Selectable(selectedCharacter.tasks[i].name.c_str(), isTaskSelected))
-				{
-					i_selectedTaskIndex = i;
-				}
-			}
-			ImGui::EndCombo();
-			if (ImGui::IsItemHovered())
-			{
-				ImGui::SetTooltip("Task selection");
-			}
-		}
-	}
-
-}
-
-void DrawCharactersMissingTask(const Task& selectedTask)
-{
-	if (!selectedTask.missingList.empty())
-	{
-		ImGui::SeparatorText("Characters missing this task");
-		for (size_t i = 0; i < selectedTask.missingList.size(); ++i)
-		{
-			std::string displayedName = b_anonMode ? AnonymizeName(selectedTask.missingList[i].c_str()) : selectedTask.missingList[i].c_str();
-			ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%s", displayedName.c_str());
-			if (ImGui::IsItemHovered())
-			{
-				ImGui::SetTooltip("Bring %s to foreground", displayedName.c_str());
-				if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-				{
-					char command[256];
-					snprintf(command, sizeof(command), "/dex %s /foreground", selectedTask.missingList[i].c_str());
-					DoCommand(command);
-				}
-			}
-			if (i < selectedTask.missingList.size() - 1)
-			{
-				ImGui::SameLine();
-				ImGui::Text(ICON_MD_REMOVE);
-				ImGui::SameLine();
-			}
-		}
-		
-	}
-}
-
-void DrawCharsMissingObj(const Objective& objective)
-{
-	if (!objective.objectiveDifferences.empty())
-	{
-		for (const auto& diffPair : objective.objectiveDifferences)
-		{
-			const std::vector<ObjectiveDifference>& diffs = diffPair.second;
-
-			for (size_t i = 0; i < diffs.size(); ++i) {
-				const auto& diff = diffs[i];
-				std::string displayedName = b_anonMode ? AnonymizeName(diff.characterName) : diff.characterName;
-
-				ImVec4 color = diff.isAhead ? ImVec4(0.0f, 1.0f, 0.0f, 1.0f) : ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
-
-				ImGui::TextColored(color, "%s", displayedName.c_str());
-				
-				if (ImGui::IsItemHovered())
-				{
-					ImGui::SetTooltip("Bring %s to foreground", displayedName.c_str());
-					if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
-					{
-						char command[256];
-						snprintf(command, sizeof(command), "/dex %s /foreground", diff.characterName.c_str());
-						DoCommand(command);
-					}
-				}
-
-				if (i != diffs.size() - 1) {
-					ImGui::SameLine();
-					ImGui::Text(ICON_MD_REMOVE);
-					ImGui::SameLine();
-				}
-			}
-		}
-	}
-}
-
-void DrawTaskDetails(const Task& selectedTask)
-{
-	ImGui::Separator();
-	if (ImGui::BeginTable("##Objective Table", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
-	{
-		for (const Objective& objective : selectedTask.objectives)
-		{
-			ImGui::TableNextColumn();
-			ImGui::Text(objective.objectiveText.c_str());
-			ImGui::TableNextColumn();
-			if (objective.isCompleted)
-			{
-				ImGui::TextColored(ImVec4(0, 255, 0, 255), "Done");
-			}
-			else
-			{
-				if (objective.progress != -1 && objective.required != -1)
-				{
-					ImGui::Text("%d/%d", objective.progress, objective.required);
-				}
-			}
-			ImGui::TableNextColumn();
-			DrawCharsMissingObj(objective);
-			ImGui::TableNextRow();
-		}
-		ImGui::EndTable();
-	}
-}
-
-void DrawTaskHud(const Task& selectedTask)
-{
-	ImGui::SetNextWindowSize(ImVec2(FIRST_WINDOW_WIDTH, FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
-	if (ImGui::Begin("Task HUD", &b_showMQTaskHudWindow, ImGuiWindowFlags_None))
-	{
-		DrawComboBoxes();
-		DrawCharactersMissingTask(selectedTask);
-		DrawTaskDetails(selectedTask);
-		ImGui::EndTabItem();
-	}
-
-	ImGui::End();
-}
-
 PLUGIN_API void OnUpdateImGui()
 {
-	if (GetGameState() == GAMESTATE_INGAME && b_showMQTaskHudWindow)
+	if (GetGameState() == GAMESTATE_INGAME && taskTable.showTaskHudWindow)
 	{
-		if (!fullTaskTable.empty())
+		if (!taskTable.isEmpty())
 		{
-			if (i_selectedCharIndex >= fullTaskTable.size())
+			if (taskTable.selectedCharIndex >= taskTable.getPeerCount() || taskTable.getPeerCount() == 0)
 			{
-				ImGui::SetNextWindowSize(ImVec2(FIRST_WINDOW_WIDTH, FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
-				if (ImGui::Begin("Task HUD", &b_showMQTaskHudWindow, ImGuiWindowFlags_None))
-				{
-					ImGui::Text("Updating data.");
-					ImGui::End();
+				drawTaskHudLoading();
+				return;
+			}
+			
+			int selectedCharID = taskTable.getPeerAtIndex(taskTable.selectedCharIndex).getId();
+			std::optional<Character> selectedCharOpt = taskTable.getCharacterById(selectedCharID);
+			if (selectedCharOpt) 
+			{
+				Character selectedCharacter = *selectedCharOpt;
+				if (selectedCharacter.getTasks().empty()) {
+					//character found but no tasks, draw loading
+					drawTaskHudLoading();
 					return;
 				}
 
-				ImGui::End();
+				if (taskTable.selectedTaskIndex >= selectedCharacter.getTasks().size())
+				{
+					taskTable.selectedTaskIndex = selectedCharacter.getTasks().size() - 1;
+				}
+				auto selectedTaskOpt = selectedCharacter.getTaskByIndex(taskTable.selectedTaskIndex);
+				if (!selectedTaskOpt) {
+					drawTaskHudLoading();
+					return;
+				}
+				const Task selectedTask = *selectedTaskOpt;
+				drawTaskHud(selectedTask);
 			}
-			Character& selectedCharacter = fullTaskTable[i_selectedCharIndex];
-			if (i_selectedTaskIndex < selectedCharacter.tasks.size())
+			else 
 			{
-				Task& selectedTask = selectedCharacter.tasks[i_selectedTaskIndex];
-				DrawTaskHud(selectedTask);
+				//character not found draw loading
+				drawTaskHudLoading();
+				return;
 			}
 		}
-	}	
-}
+	}
+}	
 
 PLUGIN_API bool OnIncomingChat(const char* Line, DWORD Color)
 {
 	if (strstr(Line, "Your task") && strstr(Line, "has been updated"))
 	{
-		RequestTasks();
+		requestTasks();
 	}
 	else if (strstr(Line, "You have been assigned the task"))
 	{
-		RequestTasks();
+		requestTasks();
 	}
 
 	// DebugSpewAlways("MQtest::OnIncomingChat(%s, %d)", Line, Color);
 	return false;
 }
 
+PLUGIN_API void OnPulse()
+{
+	static std::chrono::steady_clock::time_point PulseTimer = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+		// Run only after timer is up
+		if (std::chrono::steady_clock::now() >= PulseTimer)
+		{
+			PulseTimer += std::chrono::seconds(1);
+			//DebugSpewAlways("MQtest::OnPulse()");
+			doHeartbeat();
+		}
+}
+
+PLUGIN_API void OnBeginZone()
+{
+	MessageHandler::sendHeartbeatMessages(HeartbeatType::PauseHeartbeat);
+}
+
+PLUGIN_API void OnZoned()
+{
+	if (!taskTable.isRegistered && GetGameState() == GAMESTATE_INGAME)
+	{
+		MessageHandler::sendHeartbeatMessages(HeartbeatType::Register);
+		taskTable.isRegistered = true;
+		return;
+	}
+	MessageHandler::sendHeartbeatMessages(HeartbeatType::ResumeHeartbeat);
+}

@@ -74,9 +74,12 @@
   </PropertyGroup>
   <ItemGroup>
     <ClCompile Include="MQTaskHud.cpp" />
+    <ClCompile Include="MessageHandler.cpp" />
+    <ClCompile Include="TaskHudImGui.cpp" />
     <ClCompile Include="Taskhud.pb.cc" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="MessageHandler.h" />
     <ClInclude Include="MQTaskHud.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="Taskhud.pb.h" />

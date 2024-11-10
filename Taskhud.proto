@@ -1,35 +1,60 @@
 syntax = "proto3";
 
-package mq.proto.taskhud;
+package mq.proto.TaskHud;
 
 enum MessageId {
 	Request = 0;
 	Incoming = 1;
+	Register = 2;
+	RegisterResponse = 3;
+	PauseHeartbeat = 4;
+	ResumeHeartbeat = 5;
+	Heartbeat = 6;
+	Update = 7;
 }
 
 message TaskHud {
 	MessageId id = 1;
-	optional bytes payload = 2;
+	bytes payload = 2;
 }
 
 message RequestMessage {
 	string reqChar = 1;
 }
 
+//register and heartbeat messages
+message HeartbeatMessages {
+	string name = 1;
+	string zone = 2;
+	string groupLeadername = 3;
+	int32 charID = 4;
+}
+
 message Objective {
-    string objectiveText = 1;
-    bool isCompleted = 2;
-    int32 progress = 3;
+	string objectiveText = 1;
+	bool isCompleted = 2;
+	int32 progress = 3;
 	int32 required = 4;
 	int32 index = 5;
 }
 
 message Task {
-    string name = 1;
-    repeated Objective objectives = 2;
+	string name = 1;
+	repeated Objective objectives = 2;
 }
 
 message TaskTable {
 	string character = 1;
-	repeated Task tasks = 2;
+	string groupLeaderName = 2;
+	string zone = 3;
+	int32 charID = 4;
+	repeated Task tasks = 5;
+}
+
+message UpdateMessage {
+	string character = 1;
+	string taskName = 2;
+	int32 objectiveIndex = 3;
+	bool isCompleted = 4;
+	int32 progress = 5;
 }
