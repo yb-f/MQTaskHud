@@ -73,7 +73,7 @@ void MessageHandler::sendHeartbeatMessages(HeartbeatType type)
 }
 
 //process data
-void MessageHandler::processIncomingMessage(proto::TaskHud::TaskTable& protoTaskTable) {
+void MessageHandler::processIncomingMessage(const proto::TaskHud::TaskTable& protoTaskTable) {
 	Character newCharacter(protoTaskTable.character());
 	newCharacter.setGroupLeaderName(protoTaskTable.groupleadername());
 	for (const auto& protoTask : protoTaskTable.tasks()) {
@@ -108,7 +108,7 @@ void MessageHandler::processRequestMessage() {
 
 //process registration
 //register message
-void MessageHandler::processRegisterMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
+void MessageHandler::processRegisterMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
 	bool peerExists = false;
 	bool updated = false;
 
@@ -145,7 +145,7 @@ void MessageHandler::processRegisterMessage(proto::TaskHud::HeartbeatMessages& h
 }
 
 //register response message
-void MessageHandler::processRegisterResponseMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
+void MessageHandler::processRegisterResponseMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
 	bool peerExists = false;
 	bool updated = false;
 
@@ -183,7 +183,7 @@ void MessageHandler::processRegisterResponseMessage(proto::TaskHud::HeartbeatMes
 
 //process heartbeats
 //pause message
-void MessageHandler::processPauseHeartbeatMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
+void MessageHandler::processPauseHeartbeatMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
 	if (heartbeatMessage.name() == pLocalPlayer->DisplayedName) return;
 	bool peerExists = false;
 	for (auto& peer : taskTable.getPeers())
@@ -200,7 +200,7 @@ void MessageHandler::processPauseHeartbeatMessage(proto::TaskHud::HeartbeatMessa
 }
 
 //resume message
-void MessageHandler::processResumeHeartbeatMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
+void MessageHandler::processResumeHeartbeatMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
 	bool peerExists = false;
 	for (auto& peer : taskTable.getPeers())
 	{
@@ -216,7 +216,7 @@ void MessageHandler::processResumeHeartbeatMessage(proto::TaskHud::HeartbeatMess
 }
 
 //heartbeat message
-void MessageHandler::processHeartbeatMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
+void MessageHandler::processHeartbeatMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage) {
 	bool peerExists = false;
 	for (auto& peer : taskTable.getPeers())
 	{

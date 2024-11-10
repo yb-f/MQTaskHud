@@ -1,5 +1,4 @@
 #include <mq/Plugin.h>
-#include "mq/api/ActorAPI.h"
 #include "imgui/fonts/IconsMaterialDesign.h"
 #include "MQTaskHud.h"
 
@@ -15,7 +14,7 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 	{
 		for (int i = 0; i < taskTable.getPeerCount(); ++i)
 		{
-			Peer& tmpPeer = taskTable.getPeerAtIndex(i);
+			const auto& tmpPeer = taskTable.getPeerAtIndex(i);
 			bool is_selected = (taskTable.selectedCharIndex == i);
 			if (ImGui::Selectable(tmpPeer.getName(taskTable.anonMode).c_str(), is_selected))
 			{
@@ -62,7 +61,7 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 		ImGui::SetTooltip("Refresh tasks");
 	}
 
-	if (!taskTable.isEmpty() && taskTable.selectedCharIndex < taskTable.getPeers().size())
+	if (!taskTable.isEmpty() && taskTable.selectedCharIndex < taskTable.getPeerCount())
 	{
 		int selectedCharID = taskTable.getPeerAtIndex(taskTable.selectedCharIndex).getId();
 		if (auto selectedCharOpt = taskTable.getCharacterById(selectedCharID))
@@ -70,16 +69,14 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 			Character selectedCharacter = *selectedCharOpt;
 			if (!selectedCharacter.getTasks().empty())
 			{
-				const auto& selectedTaskOpt = selectedCharacter.getTaskByIndex(taskTable.selectedTaskIndex);
-				if (selectedTaskOpt)
+				if (const auto& selectedTaskOpt = selectedCharacter.getTaskByIndex(taskTable.selectedTaskIndex))
 				{
-					const Task selectedTask = *selectedTaskOpt;
+					const auto& selectedTask = *selectedTaskOpt;
 					if (ImGui::BeginCombo("##Task Select", selectedTask.getTaskName().c_str()))
 					{
-						for (int i = 0; i < selectedCharacter.getTasks().size(); ++i)
+						for (int i = 0; i < selectedCharacter.getTasksCount(); ++i)
 						{
-							const auto& taskOpt = selectedCharacter.getTaskByIndex(i);
-							if (taskOpt)  // Check if the task is valid
+							if (const auto& taskOpt = selectedCharacter.getTaskByIndex(i))
 							{
 								Task tmpTask = *taskOpt;
 								bool isTaskSelected = (taskTable.selectedTaskIndex == i);
@@ -109,18 +106,16 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 
 void drawCharactersMissingTask(std::string_view myGroupLeader, std::string_view myZone, bool amIGrouped, const Task& selectedTask)
 {
-	bool isFirst = true;
 	if (!selectedTask.getMissingList().empty())
 	{
 		ImGui::SeparatorText("Characters missing this task");
+		bool isFirst = true;
 		for (int i = 0; i < selectedTask.getMissingList().size(); ++i)
 		{
 			const std::string& characterName = selectedTask.getMissingNameByIndex(i);
-
-			bool shouldDisplay = false;
-			auto characterOpt = taskTable.getCharacterByName(characterName);
-			if (characterOpt)
+			if (auto characterOpt = taskTable.getCharacterByName(characterName))
 			{
+				bool shouldDisplay = false;
 				auto& character = *characterOpt;
 				if (taskTable.selectedPeerIndex == 0 && amIGrouped)
 				{
@@ -202,7 +197,7 @@ void drawCharsMissingObj(std::string_view myGroupLeader, std::string_view myZone
 	}
 }
 
-void drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, const bool& b_amIGrouped, const Task& selectedTask)
+void drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Task& selectedTask)
 {
 	ImGui::Separator();
 	if (ImGui::BeginTable("##Objective Table", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
@@ -227,7 +222,7 @@ void drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, co
 				}
 			}
 			ImGui::TableNextColumn();
-			drawCharsMissingObj(myGroupLeader, myZone, b_amIGrouped, objective);
+			drawCharsMissingObj(myGroupLeader, myZone, amIGrouped, objective);
 			ImGui::TableNextRow();
 		}
 		ImGui::EndTable();

@@ -332,6 +332,11 @@ public:
 		return tasks;
 	}
 
+	int getTasksCount() const
+	{
+		return static_cast<int>(tasks.size());
+	}
+
 private:
 	int charId;
 	std::string charName;
@@ -533,7 +538,7 @@ private:
 void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone, const bool& amIGrouped);
 void drawCharactersMissingTask(std::string_view myGroupLeader, std::string_view myZone, const Task& selectedTask);
 void drawCharsMissingObj(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Objective& objective);
-void drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, const bool& b_amIGrouped, const Task& selectedTask);
+void drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Task& selectedTask);
 void drawTaskHud(const Task& selectedTask);
 void drawTaskHudLoading();
 std::vector<Task> getTasks();

@@ -41,14 +41,17 @@ void dumpMissingList(const std::vector<std::string>& missingList) {
 	if (!missingList.empty())
 	{
 		std::string buffer = "      Missing List: \ag";
-		for (std::string missingName : missingList)
-		{ 
+		for (const std::string& missingName : missingList)
+		{
 			std::string displayedName;
 			if (taskTable.anonMode)
 			{
 				displayedName = std::string(1, missingName.front()) + "***" + std::string(1, missingName.back()) + " ";
 			}
-			displayedName = missingName + " ";
+			else
+			{
+				displayedName = missingName + " ";
+			}
 			buffer += displayedName;
 		}
 		WriteChatf(PLUGIN_MSG "%s", buffer.c_str());
@@ -116,8 +119,8 @@ void requestTasks()
 	THDropbox.Post(address, message);
 }
 
-void thCmd(PlayerClient* pChar, char* szLine) {
-	char arg[MAX_STRING] = { 0 };
+void thCmd(PlayerClient* pChar, const char* szLine) {
+	char arg[MAX_STRING] = {};
 	GetMaybeQuotedArg(arg, MAX_STRING, szLine, 1);
 	if (strlen(arg)) {
 		if (ci_equals(arg, "help")) {
@@ -194,7 +197,7 @@ std::vector<Task> getTasks()
 			auto taskStatus = pTaskManager->GetTaskStatus(pLocalPC, i, task.TaskSystem);
 			for (int j = 0; j < MAX_TASK_ELEMENTS; ++j)
 			{
-				char szTemp[MAX_STRING] = { 0 };
+				char szTemp[MAX_STRING] = {};
 				pTaskManager->GetElementDescription(&task.Elements[j], szTemp);
 				if (strcmp(szTemp, "? ? ?") == 0)
 				{
@@ -423,19 +426,18 @@ PLUGIN_API void OnUpdateImGui()
 			}
 			
 			int selectedCharID = taskTable.getPeerAtIndex(taskTable.selectedCharIndex).getId();
-			std::optional<Character> selectedCharOpt = taskTable.getCharacterById(selectedCharID);
-			if (selectedCharOpt) 
+			if (auto selectedCharOpt = taskTable.getCharacterById(selectedCharID))
 			{
 				Character selectedCharacter = *selectedCharOpt;
-				if (selectedCharacter.getTasks().empty()) {
+				if (selectedCharacter.getTasksCount() == 0) {
 					//character found but no tasks, draw loading
 					drawTaskHudLoading();
 					return;
 				}
 
-				if (taskTable.selectedTaskIndex >= selectedCharacter.getTasks().size())
+				if (taskTable.selectedTaskIndex >= selectedCharacter.getTasksCount())
 				{
-					taskTable.selectedTaskIndex = selectedCharacter.getTasks().size() - 1;
+					taskTable.selectedTaskIndex = selectedCharacter.getTasksCount() - 1;
 				}
 				auto selectedTaskOpt = selectedCharacter.getTaskByIndex(taskTable.selectedTaskIndex);
 				if (!selectedTaskOpt) {

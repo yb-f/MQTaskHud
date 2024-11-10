@@ -2,7 +2,6 @@
 
 #include "Taskhud.pb.h"
 #include "MQTaskHud.h"
-#include "mq/api/ActorAPI.h"
 
 enum class HeartbeatType
 {
@@ -23,11 +22,11 @@ public:
 	static void sendHeartbeatMessages(HeartbeatType type);
 
 	// Process functions
-	static void processIncomingMessage(proto::TaskHud::TaskTable& protoTaskTable);
+	static void processIncomingMessage(const proto::TaskHud::TaskTable& protoTaskTable);
 	static void processRequestMessage();
-	static void processRegisterMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage);
-	static void processRegisterResponseMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage);
-	static void processPauseHeartbeatMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage);
-	static void processResumeHeartbeatMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage);
-	static void processHeartbeatMessage(proto::TaskHud::HeartbeatMessages& heartbeatMessage);
+	static void processRegisterMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage);
+	static void processRegisterResponseMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage);
+	static void processPauseHeartbeatMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage);
+	static void processResumeHeartbeatMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage);
+	static void processHeartbeatMessage(const proto::TaskHud::HeartbeatMessages& heartbeatMessage);
 };
