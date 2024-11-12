@@ -1,11 +1,15 @@
 // MQTaskHud.cpp : Defines the entry point for the DLL application.
 //
 //
+// TODO Add update messages
+
+
 
 #include <mq/Plugin.h>
 #include "mq/api/ActorAPI.h"
 #include "MQTaskHud.h"
 #include "MessageHandler.h"
+#include "TaskHudImGui.h"
 
 PreSetup("MQTaskHud");
 PLUGIN_VERSION(0.1);
@@ -28,7 +32,7 @@ void dumpObjectives(const Task& task)
 			for (const auto& difference : objective.getAllDifferences())
 			{
 				WriteChatf(PLUGIN_MSG "          \ar%s\aw Equal: \ag%s \ar%s",
-					difference.getCharacterName(taskTable.anonMode).c_str(),
+					difference.getCharacterName(taskTable.anonMode).data(),
 					difference.isEqualProgress() ? "Yes" : "No",
 					difference.isObjAhead() ? "[Ahead]" : "[Behind]"
 				);
@@ -68,12 +72,12 @@ void dumpTaskTable()
 
 	for (auto& character : taskTable.getCharacters())
 	{
-		WriteChatf(PLUGIN_MSG "Character: \ar%s\aw(\ag%d\aw)", character.getCharName(taskTable.anonMode).c_str(), character.getId());
-		WriteChatf(PLUGIN_MSG "  Group Leader: \ag%s\aw", character.getGroupLeaderName(taskTable.anonMode).c_str());
+		WriteChatf(PLUGIN_MSG "Character: \ar%s\aw(\ag%d\aw)", character.getCharacterName(taskTable.anonMode).data(), character.getId());
+		WriteChatf(PLUGIN_MSG "  Group Leader: \ag%s\aw", character.getGroupLeaderName(taskTable.anonMode).data());
 
 		for (auto& task : character.getTasks())
 		{
-			WriteChatf(PLUGIN_MSG "    Task: \ay%s\aw(\ag%llu\aw)", task.getTaskName().c_str(), task.getUid());
+			WriteChatf(PLUGIN_MSG "    Task: \ay%s\aw(\ag%llu\aw)", task.getTaskName().data(), task.getUid());
 
 			dumpObjectives(task);
 
@@ -93,7 +97,7 @@ void dumpPeers()
 	WriteChatf(PLUGIN_MSG "Peer List: ");
 	for (const auto& peer : taskTable.getPeers())
 	{
-		WriteChatf(PLUGIN_MSG "  Peer: \ag%s \aw(\ar%d\aw)", peer.getName(taskTable.anonMode).c_str(), peer.getId());
+		WriteChatf(PLUGIN_MSG "  Peer: \ag%s \aw(\ar%d\aw)", peer.getName(taskTable.anonMode).data(), peer.getId());
 		WriteChatf(PLUGIN_MSG "    Heartbeats missed: \ay%d", peer.getMissedHeartbeats());
 	}
 }
@@ -106,17 +110,6 @@ void requestPeers()
 		taskTable.isRegistered = true;
 	}
 	
-}
-
-void requestTasks()
-{
-	postoffice::Address address;
-	proto::TaskHud::TaskHud message;
-	proto::TaskHud::RequestMessage reqMsg;
-	reqMsg.set_reqchar(pLocalPlayer->DisplayedName);
-	message.set_id(proto::TaskHud::Request);
-	message.set_payload(reqMsg.SerializeAsString());
-	THDropbox.Post(address, message);
 }
 
 void thCmd(PlayerClient* pChar, const char* szLine) {
@@ -134,7 +127,7 @@ void thCmd(PlayerClient* pChar, const char* szLine) {
 			WriteChatf(PLUGIN_MSG "Showing UI.");
 			if (taskTable.isEmpty())
 			{
-				requestTasks();
+				MessageHandler::requestTasks();
 			}
 			taskTable.showTaskHudWindow = true;
 			return;
@@ -152,7 +145,7 @@ void thCmd(PlayerClient* pChar, const char* szLine) {
 		}
 		if (ci_equals(arg, "refresh"))
 		{
-			requestTasks();
+			MessageHandler::requestTasks();
 		}
 		if (ci_equals(arg, "refreshpeers"))
 		{
@@ -227,64 +220,67 @@ std::vector<Task> getTasks()
 
 void handleMessage(const std::shared_ptr<postoffice::Message>& message)
 {
-	if (message->Payload)
+	if (taskTable.communicationEnabled)
 	{
-		proto::TaskHud::TaskHud taskHudMessage;
-		taskHudMessage.ParseFromString(*message->Payload);
+		if (message->Payload)
+		{
+			proto::TaskHud::TaskHud taskHudMessage;
+			taskHudMessage.ParseFromString(*message->Payload);
 
-		switch (taskHudMessage.id())
-		{
-		case proto::TaskHud::Request:
-		{
-			MessageHandler::processRequestMessage();
-			break;
-		}
-		case proto::TaskHud::Incoming:
-		{
-			proto::TaskHud::TaskTable protoTaskTable;
-			protoTaskTable.ParseFromString(taskHudMessage.payload());
-			MessageHandler::processIncomingMessage(protoTaskTable);
-			break;
-		}
-		case proto::TaskHud::Register:
-		{
-			proto::TaskHud::HeartbeatMessages heartbeat;
-			heartbeat.ParseFromString(taskHudMessage.payload());
-			MessageHandler::processRegisterMessage(heartbeat);
-			break;
-		}
-		case proto::TaskHud::RegisterResponse:
-		{
-			proto::TaskHud::HeartbeatMessages heartbeat;
-			heartbeat.ParseFromString(taskHudMessage.payload());
-			MessageHandler::processRegisterResponseMessage(heartbeat);
-			break;
-		}
-		case proto::TaskHud::PauseHeartbeat:
-		{
-			proto::TaskHud::HeartbeatMessages heartbeat;
-			heartbeat.ParseFromString(taskHudMessage.payload());
-			MessageHandler::processPauseHeartbeatMessage(heartbeat);
-			break;
-		}
-		case proto::TaskHud::ResumeHeartbeat:
-		{
-			proto::TaskHud::HeartbeatMessages heartbeat;
-			heartbeat.ParseFromString(taskHudMessage.payload());
-			MessageHandler::processResumeHeartbeatMessage(heartbeat);
-			break;
-		}
-		case proto::TaskHud::Heartbeat:
-		{
-			proto::TaskHud::HeartbeatMessages heartbeat;
-			heartbeat.ParseFromString(taskHudMessage.payload());
-			MessageHandler::processHeartbeatMessage(heartbeat);
-			break;
-		}
-		default:
-		{
-			break;
-		}
+			switch (taskHudMessage.id())
+			{
+			case proto::TaskHud::Request:
+			{
+				MessageHandler::processRequestMessage();
+				break;
+			}
+			case proto::TaskHud::Incoming:
+			{
+				proto::TaskHud::TaskTable protoTaskTable;
+				protoTaskTable.ParseFromString(taskHudMessage.payload());
+				MessageHandler::processIncomingMessage(protoTaskTable);
+				break;
+			}
+			case proto::TaskHud::Register:
+			{
+				proto::TaskHud::HeartbeatMessages heartbeat;
+				heartbeat.ParseFromString(taskHudMessage.payload());
+				MessageHandler::processRegisterMessage(heartbeat);
+				break;
+			}
+			case proto::TaskHud::RegisterResponse:
+			{
+				proto::TaskHud::HeartbeatMessages heartbeat;
+				heartbeat.ParseFromString(taskHudMessage.payload());
+				MessageHandler::processRegisterResponseMessage(heartbeat);
+				break;
+			}
+			case proto::TaskHud::PauseHeartbeat:
+			{
+				proto::TaskHud::HeartbeatMessages heartbeat;
+				heartbeat.ParseFromString(taskHudMessage.payload());
+				MessageHandler::processPauseHeartbeatMessage(heartbeat);
+				break;
+			}
+			case proto::TaskHud::ResumeHeartbeat:
+			{
+				proto::TaskHud::HeartbeatMessages heartbeat;
+				heartbeat.ParseFromString(taskHudMessage.payload());
+				MessageHandler::processResumeHeartbeatMessage(heartbeat);
+				break;
+			}
+			case proto::TaskHud::Heartbeat:
+			{
+				proto::TaskHud::HeartbeatMessages heartbeat;
+				heartbeat.ParseFromString(taskHudMessage.payload());
+				MessageHandler::processHeartbeatMessage(heartbeat);
+				break;
+			}
+			default:
+			{
+				break;
+			}
+			}
 		}
 	}
 }
@@ -338,15 +334,17 @@ void compareCharacterTasks(Character& characterA, Character& characterB)
 							auto [equal, isAheadA] = compareObjectives(objA, objB);
 							if (equal) {
 								// tasks are equal, set equal to true for both characters
-								objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), true, false, characterB.getCharName()));
+							objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), true, false, std::string(characterB.getCharacterName())));
+;
 							}
 							else if (isAheadA) {
-								// A is ahead, so set isAhead to true in A, false in B
-								objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), false, true, characterB.getCharName()));
+								// A is ahead, so set isAhead to true in A, false in Bc
+								objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), false, true, std::string(characterB.getCharacterName())));
 							}
 							else {
 								// B is ahead, so false in A, true in B
-								objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), false, false, characterB.getCharName()));
+								objA.addObjectiveDifference(ObjectiveDifference(objA.getIndex(), false, false, std::string(characterB.getCharacterName())));
+
 							}
 						}
 					}
@@ -355,7 +353,7 @@ void compareCharacterTasks(Character& characterA, Character& characterB)
 		}
 		if (!hasTask)
 		{
-			taskA.addToMissingList(characterB.getCharName());
+			taskA.addToMissingList(std::string(characterB.getCharacterName()));
 		}
 	}
 }
@@ -379,15 +377,31 @@ void compareTasks()
 
 void doHeartbeat()
 {
-	MessageHandler::sendHeartbeatMessages(HeartbeatType::Heartbeat);
-
-	for (auto& peer : taskTable.getPeers())
+	if (taskTable.communicationEnabled)
 	{
-		peer.incrementHeartbeats();
-		if (peer.getMissedHeartbeats() >= 6)
+		MessageHandler::sendHeartbeatMessages(HeartbeatType::Heartbeat);
+
+		for (auto& peer : taskTable.getPeers())
 		{
-			taskTable.removePeerById(peer.getId());
+			peer.incrementHeartbeats();
+			if (peer.getMissedHeartbeats() >= 6)
+			{
+				taskTable.removePeerById(peer.getId());
+			}
 		}
+	}
+}
+
+
+PLUGIN_API void SetGameState(int GameState)
+{
+	if (GetGameState() == GAMESTATE_INGAME)
+	{
+		taskTable.communicationEnabled = true;
+	}
+	else
+	{
+		taskTable.communicationEnabled = false;
 	}
 }
 
@@ -396,12 +410,10 @@ PLUGIN_API void InitializePlugin()
 	DebugSpewAlways("MQTaskHud::Initializing version %f", MQ2Version);
 	AddCommand("/th", thCmd, false, true, true);
 	THDropbox = postoffice::AddActor(handleMessage);
-	if (GetGameState() == GAMESTATE_INGAME)
+	if (taskTable.communicationEnabled)
 	{
 		MessageHandler::sendHeartbeatMessages(HeartbeatType::Register);
 	}
-	WriteChatf(PLUGIN_MSG "Welcome to Task HUD!");
-	WriteChatf(PLUGIN_MSG "Use \ay/th help\aw to show help or \ay/th show\aw to show the UI.");
 	// AddXMLFile("MQUI_MyXMLFile.xml");
 	// AddMQ2Data("mytlo", MyTLOData);
 }
@@ -423,7 +435,7 @@ PLUGIN_API void OnUpdateImGui()
 		{
 			if (taskTable.selectedCharIndex >= taskTable.getPeerCount() || taskTable.getPeerCount() == 0)
 			{
-				drawTaskHudLoading();
+				TaskHudImGui::drawTaskHudLoading();
 				return;
 			}
 			
@@ -433,7 +445,7 @@ PLUGIN_API void OnUpdateImGui()
 				Character selectedCharacter = *selectedCharOpt;
 				if (selectedCharacter.getTasksCount() == 0) {
 					//character found but no tasks, draw loading
-					drawTaskHudLoading();
+					TaskHudImGui::drawTaskHudLoading();
 					return;
 				}
 
@@ -443,16 +455,16 @@ PLUGIN_API void OnUpdateImGui()
 				}
 				auto selectedTaskOpt = selectedCharacter.getTaskByIndex(taskTable.selectedTaskIndex);
 				if (!selectedTaskOpt) {
-					drawTaskHudLoading();
+					TaskHudImGui::drawTaskHudLoading();
 					return;
 				}
 				const Task selectedTask = *selectedTaskOpt;
-				drawTaskHud(selectedTask);
+				TaskHudImGui::drawTaskHud(selectedTask);
 			}
 			else 
 			{
 				//character not found draw loading
-				drawTaskHudLoading();
+				TaskHudImGui::drawTaskHudLoading();
 				return;
 			}
 		}
@@ -463,11 +475,11 @@ PLUGIN_API bool OnIncomingChat(const char* Line, DWORD Color)
 {
 	if (strstr(Line, "Your task") && strstr(Line, "has been updated"))
 	{
-		requestTasks();
+		MessageHandler::requestTasks();
 	}
 	else if (strstr(Line, "You have been assigned the task"))
 	{
-		requestTasks();
+		MessageHandler::requestTasks();
 	}
 
 	// DebugSpewAlways("MQtest::OnIncomingChat(%s, %d)", Line, Color);
@@ -476,31 +488,57 @@ PLUGIN_API bool OnIncomingChat(const char* Line, DWORD Color)
 
 PLUGIN_API void OnPulse()
 {
-	if (GetGameState() == GAMESTATE_INGAME)
+	if (taskTable.communicationEnabled)
 	{
-		static std::chrono::steady_clock::time_point PulseTimer = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-		// Run only after timer is up
-		if (std::chrono::steady_clock::now() >= PulseTimer)
+		if (!taskTable.welcomeSent)
 		{
-			PulseTimer += std::chrono::seconds(1);
-			//DebugSpewAlways("MQtest::OnPulse()");
-			doHeartbeat();
+			taskTable.welcomeSent = true;
+			WriteChatf(PLUGIN_MSG "Welcome to Task HUD!");
+			WriteChatf(PLUGIN_MSG "Use \ay/th help\aw to show help or \ay/th show\aw to show the UI.");
+		}
+
+
+		if (taskTable.isRegistered)
+		{
+			static std::chrono::steady_clock::time_point PulseTimer = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+			// Run only after timer is up
+			if (std::chrono::steady_clock::now() >= PulseTimer)
+			{
+				PulseTimer += std::chrono::seconds(1);
+				//DebugSpewAlways("MQtest::OnPulse()");
+				doHeartbeat();
+			}
+		}
+		else
+		{
+			MessageHandler::sendHeartbeatMessages(HeartbeatType::Register);
 		}
 	}
 }
 
 PLUGIN_API void OnBeginZone()
 {
-	MessageHandler::sendHeartbeatMessages(HeartbeatType::PauseHeartbeat);
+	if (taskTable.communicationEnabled)
+	{
+		if (taskTable.isRegistered)
+		{
+		MessageHandler::sendHeartbeatMessages(HeartbeatType::PauseHeartbeat);
+		}
+	}
 }
 
 PLUGIN_API void OnZoned()
 {
-	if (!taskTable.isRegistered && GetGameState() == GAMESTATE_INGAME)
+	if (taskTable.communicationEnabled)
 	{
-		MessageHandler::sendHeartbeatMessages(HeartbeatType::Register);
-		taskTable.isRegistered = true;
-		return;
+		if (!taskTable.isRegistered)
+		{
+			MessageHandler::sendHeartbeatMessages(HeartbeatType::Register);
+			taskTable.isRegistered = true;
+			return;
+		} else
+		{
+			MessageHandler::sendHeartbeatMessages(HeartbeatType::ResumeHeartbeat);
+		}
 	}
-	MessageHandler::sendHeartbeatMessages(HeartbeatType::ResumeHeartbeat);
 }

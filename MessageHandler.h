@@ -17,6 +17,7 @@ public:
 	MessageHandler();
 
 	// Send functions
+	static void requestTasks();
 	static void sendTasks(const std::vector<Task>& tasks);
 	static void sendHeartbeatMessages(HeartbeatType type, int charId);
 	static void sendHeartbeatMessages(HeartbeatType type);

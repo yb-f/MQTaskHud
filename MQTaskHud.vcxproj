@@ -83,6 +83,7 @@
     <ClInclude Include="MQTaskHud.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="Taskhud.pb.h" />
+    <ClInclude Include="TaskHudImGui.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MQTaskHud.rc" />

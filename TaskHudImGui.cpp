@@ -1,22 +1,21 @@
+#include "TaskHudImGui.h"
+
 #include <mq/Plugin.h>
 #include "imgui/fonts/IconsMaterialDesign.h"
 #include "MQTaskHud.h"
+#include "TaskHudImGui.h"
+#include "MessageHandler.h"
 
-constexpr int FIRST_WINDOW_WIDTH = 445;
-constexpr int FIRST_WINDOW_HEIGHT = 490;
-
-const std::vector<std::string> peerType = {"Group", "Zone", "All"};
-
-void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone, const bool& amIGrouped)
+void TaskHudImGui::drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone, const bool& amIGrouped)
 {
 	ImGui::SetNextItemWidth(100);
-	if (ImGui::BeginCombo("##Character Select", taskTable.getPeerAtIndex(taskTable.selectedCharIndex).getName(taskTable.anonMode).c_str()))
+	if (ImGui::BeginCombo("##Character Select", taskTable.getPeerAtIndex(taskTable.selectedCharIndex).getName(taskTable.anonMode).data()))
 	{
 		for (int i = 0; i < taskTable.getPeerCount(); ++i)
 		{
 			const auto& tmpPeer = taskTable.getPeerAtIndex(i);
 			bool is_selected = (taskTable.selectedCharIndex == i);
-			if (ImGui::Selectable(tmpPeer.getName(taskTable.anonMode).c_str(), is_selected))
+			if (ImGui::Selectable(tmpPeer.getName(taskTable.anonMode).data(), is_selected))
 			{
 				taskTable.selectedCharIndex = i;
 			}
@@ -26,6 +25,10 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 			}
 		}
 		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip("Character selection");
 	}
 
 	ImGui::SameLine();
@@ -45,16 +48,16 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 			}
 		}
 		ImGui::EndCombo();
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::SetTooltip("Peer group selection");
-		}
+	}
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip("Peer group selection");
 	}
 
 	ImGui::SameLine();
 	if (ImGui::SmallButton(ICON_MD_REFRESH))
 	{
-		requestTasks();
+		MessageHandler::requestTasks();
 	}
 	if (ImGui::IsItemHovered())
 	{
@@ -72,7 +75,7 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 				if (const auto& selectedTaskOpt = selectedCharacter.getTaskByIndex(taskTable.selectedTaskIndex))
 				{
 					const auto& selectedTask = *selectedTaskOpt;
-					if (ImGui::BeginCombo("##Task Select", selectedTask.getTaskName().c_str()))
+					if (ImGui::BeginCombo("##Task Select", selectedTask.getTaskName().data()))
 					{
 						for (int i = 0; i < selectedCharacter.getTasksCount(); ++i)
 						{
@@ -80,17 +83,17 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 							{
 								Task tmpTask = *taskOpt;
 								bool isTaskSelected = (taskTable.selectedTaskIndex == i);
-								if (ImGui::Selectable(tmpTask.getTaskName().c_str(), isTaskSelected))
+								if (ImGui::Selectable(tmpTask.getTaskName().data(), isTaskSelected))
 								{
 									taskTable.selectedTaskIndex = i;
 								}
 							}
 						}
 						ImGui::EndCombo();
-						if (ImGui::IsItemHovered())
-						{
-							ImGui::SetTooltip("Task selection");
-						}
+					}
+					if (ImGui::IsItemHovered())
+					{
+						ImGui::SetTooltip("Task selection");
 					}
 				}
 			}
@@ -104,7 +107,7 @@ void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone,
 	}
 }
 
-void drawCharactersMissingTask(std::string_view myGroupLeader, std::string_view myZone, bool amIGrouped, const Task& selectedTask)
+void TaskHudImGui::drawCharactersMissingTask(std::string_view myGroupLeader, std::string_view myZone, bool amIGrouped, const Task& selectedTask)
 {
 	if (!selectedTask.getMissingList().empty())
 	{
@@ -112,11 +115,11 @@ void drawCharactersMissingTask(std::string_view myGroupLeader, std::string_view 
 		bool isFirst = true;
 		for (int i = 0; i < selectedTask.getMissingList().size(); ++i)
 		{
-			const std::string& characterName = selectedTask.getMissingNameByIndex(i);
+			const std::string_view characterName = selectedTask.getMissingNameByIndex(i);
 			if (auto characterOpt = taskTable.getCharacterByName(characterName))
 			{
 				bool shouldDisplay = false;
-				auto& character = *characterOpt;
+				Character& character = *characterOpt;
 				if (taskTable.selectedPeerIndex == 0 && amIGrouped)
 				{
 					shouldDisplay = character.getGroupLeaderName() == myGroupLeader;
@@ -138,14 +141,13 @@ void drawCharactersMissingTask(std::string_view myGroupLeader, std::string_view 
 						ImGui::Text(ICON_MD_REMOVE);
 						ImGui::SameLine();
 					}
-					ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%s", character.getCharName(taskTable.anonMode).c_str());
+					ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%s", character.getCharacterName(taskTable.anonMode).data());
 					if (ImGui::IsItemHovered())
 					{
-						ImGui::SetTooltip("Bring %s to foreground", character.getCharName(taskTable.anonMode).c_str());
+						ImGui::SetTooltip("Bring %s to foreground", character.getCharacterName(taskTable.anonMode).data());
 						if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
 						{
-							std::string command = "/dex " + character.getCharName() + " foreground";
-							DoCommand(command.c_str());
+							DoCommandf("/dex %s foreground", character.getCharacterName().data());
 						}
 					}
 					isFirst = false;
@@ -156,7 +158,7 @@ void drawCharactersMissingTask(std::string_view myGroupLeader, std::string_view 
 	}
 }
 
-void drawCharsMissingObj(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Objective& objective)
+void TaskHudImGui::drawCharsMissingObj(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Objective& objective)
 {
 	if (!objective.getAllDifferences().empty())
 	{
@@ -179,14 +181,13 @@ void drawCharsMissingObj(std::string_view myGroupLeader, std::string_view myZone
 							ImGui::SameLine();
 						}
 						const ImVec4 color = objDiff.isObjAhead() ? ImVec4(1.0f, 0.0f, 0.0f, 1.0f) : ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
-						ImGui::TextColored(color, "%s", objDiff.getCharacterName(taskTable.anonMode).c_str());
+						ImGui::TextColored(color, "%s", objDiff.getCharacterName(taskTable.anonMode).data());
 						if (ImGui::IsItemHovered())
 						{
-							ImGui::SetTooltip("Bring %s to foreground", objDiff.getCharacterName(taskTable.anonMode).c_str());
+							ImGui::SetTooltip("Bring %s to foreground", objDiff.getCharacterName(taskTable.anonMode).data());
 							if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
 							{
-								std::string command = "/dex " + objDiff.getCharacterName() + " foreground";
-								DoCommand(command.c_str());
+								DoCommandf("/dex %s foreground", objDiff.getCharacterName().data());
 							}
 						}
 						isThisFirst = false;
@@ -197,7 +198,7 @@ void drawCharsMissingObj(std::string_view myGroupLeader, std::string_view myZone
 	}
 }
 
-void drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Task& selectedTask)
+void TaskHudImGui::drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Task& selectedTask)
 {
 	ImGui::Separator();
 	if (ImGui::BeginTable("##Objective Table", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
@@ -229,7 +230,7 @@ void drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, co
 	}
 }
 
-void drawTaskHud(const Task& selectedTask)
+void TaskHudImGui::drawTaskHud(const Task& selectedTask)
 {
 	std::string myGroupLeader;
 	std::string myZone = pZoneInfo->ShortName;
@@ -245,7 +246,7 @@ void drawTaskHud(const Task& selectedTask)
 		amIGrouped = true;
 		myGroupLeader = pLocalPC->Group->GetGroupLeader()->GetName();
 	}
-	ImGui::SetNextWindowSize(ImVec2(FIRST_WINDOW_WIDTH, FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(TaskHudImGui::FIRST_WINDOW_WIDTH, TaskHudImGui::FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
 	if (ImGui::Begin("Task HUD", &taskTable.showTaskHudWindow, ImGuiWindowFlags_None))
 	{
 		drawComboBoxes(myGroupLeader, myZone, amIGrouped);
@@ -256,9 +257,9 @@ void drawTaskHud(const Task& selectedTask)
 	ImGui::End();
 }
 
-void drawTaskHudLoading()
+void TaskHudImGui::drawTaskHudLoading()
 {
-	ImGui::SetNextWindowSize(ImVec2(FIRST_WINDOW_WIDTH, FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(TaskHudImGui::FIRST_WINDOW_WIDTH, TaskHudImGui::FIRST_WINDOW_HEIGHT), ImGuiCond_FirstUseEver);
 	if (ImGui::Begin("Task HUD", &taskTable.showTaskHudWindow, ImGuiWindowFlags_None))
 	{
 		ImGui::Text("Updating data.");

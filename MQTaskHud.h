@@ -2,8 +2,9 @@
 
 #define PLUGIN_MSG "\ay[\agTaskHud\ay]\aw "
 
-#include "Taskhud.pb.h"
 
+#include "Taskhud.pb.h"
+#include <mq/Plugin.h>
 
 #ifdef _DEBUG
 #pragma comment(lib, "libprotobufd")
@@ -17,14 +18,18 @@ public:
 		int objectiveIndex;
 		bool equalProgress;
 		bool isAhead;
-		std::string characterName;
+		std::string_view characterName;
 	};
+
 	//constructors
 	ObjectiveDifference()
 		: objectiveIndex(-1), equalProgress(false), isAhead(false), characterName("") {}
 
 	ObjectiveDifference(int index, bool equal, bool ahead, const std::string& name)
-		: objectiveIndex(index), equalProgress(equal), isAhead(ahead), characterName(name) {}
+		: objectiveIndex(index), equalProgress(equal), isAhead(ahead), characterName(name)
+	{
+		anonCharacterName = std::string(1, characterName.front()) + "***" + std::string(1, characterName.back());
+	}
 
 	//setter
 	void setValues(int index, bool equal, bool ahead, const std::string& name)
@@ -33,10 +38,11 @@ public:
 		equalProgress = equal;
 		isAhead = ahead;
 		characterName = name;
+		anonCharacterName = std::string(1, characterName.front()) + "***" + std::string(1, characterName.back());
 	}
 
 	//getters
-	DiffValues getValues() const
+	const DiffValues getValues() const
 	{
 		return { objectiveIndex, equalProgress, isAhead, characterName };
 	}
@@ -49,14 +55,17 @@ public:
 		return isAhead;
 	}
 
-	const std::string getCharacterName(bool anonMode) const { 
-		if (!anonMode) {
-			return characterName;
+	const std::string_view getCharacterName(bool anonMode) const
+	{
+		if (anonMode)
+		{
+			return anonCharacterName;
 		}
-		return std::string(1, characterName.front()) + "***" + std::string(1, characterName.back());
+		return characterName;
 	}
 
-	const std::string getCharacterName() const {
+	const std::string_view getCharacterName() const
+	{
 		return getCharacterName(false);
 	}
 
@@ -65,6 +74,7 @@ private:
 	bool equalProgress;
 	bool isAhead;
 	std::string characterName;
+	std::string anonCharacterName;
 };
 
 class Objective {
@@ -78,11 +88,11 @@ public:
 		std::vector<ObjectiveDifference> objectiveDifferences;
 	};
 
-	Objective() : objectiveText(""), isCompleted(false), progress(0), required(0), index(-1) {}
-
+	//constructor
 	Objective(const std::string& text, bool completed, int prog, int req, int idx)
 		: objectiveText(text), isCompleted(completed), progress(prog), required(req), index(idx) {}
 
+	//setters
 	void addObjectiveDifference(const ObjectiveDifference& diff) {
 		for (auto& existingDiff : objectiveDifferences) {
 			if (existingDiff.getCharacterName() == diff.getCharacterName()) {
@@ -101,18 +111,13 @@ public:
 		index = idx;
 	}
 
-	void setProgress(bool complete, int prog, int req) {
-		isCompleted = complete;
-		progress = prog;
-		required = req;
-	}
-
 	void setProgress(bool complete, int prog)
 	{
 		isCompleted = complete;
 		progress = prog;
 	}
 
+	//getters
 	bool getCompleted() const
 	{
 		return isCompleted;
@@ -126,7 +131,7 @@ public:
 		return !objectiveDifferences.empty();
 	}
 
-	std::vector<ObjectiveDifference> getAllDifferences() const {
+	const std::vector<ObjectiveDifference>& getAllDifferences() const {
 		return objectiveDifferences;
 	}
 
@@ -150,21 +155,12 @@ private:
 class Task {
 public:
 	//constructors
-	Task() : taskName("") {}
-	
 	explicit Task(const std::string& taskName)
 		: taskName(taskName) {}
 
-	Task(const std::string& taskName, unsigned long long uid)
-		: taskName(taskName), uid(uid) {}
-
-	Task(const std::string& taskName, const std::vector<Objective>& objectives)
-		: taskName(taskName), objectives(objectives) {}
-
-
 	//setters
 	void setTaskName(const std::string& taskNm) {
-		this->taskName = taskNm;
+		taskName = taskNm;
 	}
 
 	void addObjective(const Objective& obj) {
@@ -177,7 +173,7 @@ public:
 	}
 
 	void setObjectives(const std::vector<Objective>& obj) {
-		this->objectives = obj;
+		objectives = obj;
 	}
 	
 	void clearMissingList() {
@@ -189,7 +185,7 @@ public:
 	}
 
 	void setMissingList(const std::vector<std::string>& missingChars) {
-		this->missingList = missingChars;
+		missingList = missingChars;
 	}
 
 	//getters
@@ -202,17 +198,16 @@ public:
 		return objectives;
 	}
 
-	std::string getTaskName() const {
+	const std::string_view getTaskName() const {
 		return taskName;
 	}
 
-	std::vector<std::string> getMissingList() const {
+	const std::vector<std::string>& getMissingList() const {
 		return missingList;
 	}
 
-	//is this function used?
-	std::string getMissingNameByIndex(int idx) const {
-		return missingList[idx];
+	const std::string_view getMissingNameByIndex(int idx) const {
+		return missingList.at(idx);
 	}
 
 	unsigned long long getUid() const {
@@ -228,30 +223,19 @@ private:
 
 class Character {
 public:
-	//constructors
-	Character() : charId(-1), charName(""), groupLeaderName("") {}
-
-	explicit Character(const std::string& characterName)
-		: charId(-1), charName(characterName), groupLeaderName("") {}
-
-	Character(int id, const std::string& characterName)
-		: charId(id), charName(characterName), groupLeaderName("") {}
-
-	Character(int id, const std::string& characterName, const std::string& leaderName)
-		: charId(id), charName(characterName), groupLeaderName(leaderName) {}
+	//constructor
+	Character(const std::string& characterName, const std::string& groupLeaderName, const std::string& zoneShortName, const int& charId)
+		: charId(charId), charName(characterName), groupLeaderName(groupLeaderName), zoneShortName(zoneShortName)
+	{
+		anonCharName = createAnonymizedName(characterName);
+		anonGroupLeaderName = createAnonymizedName(groupLeaderName);
+	}
+	
 
 	//setters
-	void setCharId(const int id)
-	{
-		charId = id;
-	}
-
-	void setCharName(const std::string& characterName) {
-		this->charName = characterName;
-	}
-
 	void setGroupLeaderName(const std::string& leaderName) {
-		this->groupLeaderName = leaderName;
+		groupLeaderName = leaderName;
+		anonGroupLeaderName = createAnonymizedName(leaderName);
 	}
 
 	void setZoneShortName(const std::string& shortName) {
@@ -283,30 +267,34 @@ public:
 		return charId;
 	}
 
-	std::string getCharName(bool anonMode) const {
-		if (!anonMode) {
-			return charName;
+	const std::string_view getGroupLeaderName(bool anonMode) const
+	{
+		if (anonMode)
+		{
+			return anonGroupLeaderName;
 		}
-		return std::string(1, charName.front()) + "***" + std::string(1, charName.back());
+		return groupLeaderName;
 	}
 
-	std::string getCharName() const {
-		return getCharName(false);
-	}
-
-	std::string getGroupLeaderName(bool anonMode) const {
-		if (!anonMode) {
-			return groupLeaderName;
-		}
-
-		return std::string(1, groupLeaderName.front()) + "***" + std::string(1, groupLeaderName.back());
-	}
-
-	std::string getGroupLeaderName() const {
+	const std::string_view getGroupLeaderName() const {
 		return getGroupLeaderName(false);
 	}
 
-	std::string getZoneShortName() const {
+	const std::string_view getCharacterName(bool anonMode) const
+	{
+		if (anonMode)
+		{
+			return anonCharName;
+		}
+		return charName;
+	}
+
+	const std::string_view getCharacterName() const
+	{
+		return getCharacterName(false);
+	}
+
+	const std::string_view getZoneShortName() const {
 		return zoneShortName;
 	}
 
@@ -340,29 +328,31 @@ public:
 private:
 	int charId;
 	std::string charName;
+	std::string anonCharName;
 	std::string groupLeaderName;
+	std::string anonGroupLeaderName;
 	std::string zoneShortName;
 	std::vector<Task> tasks;
-		
-	unsigned long long generateTaskUid(const std::string& taskName) const {
-		std::hash<std::string> hashFunction;
+
+	static std::string createAnonymizedName(const std::string& name) {
+		return std::string(1, name.front()) + "***" + std::string(1, name.back());
+	}
+
+	unsigned long long generateTaskUid(const std::string_view taskName) const {
+		std::hash<std::string_view> hashFunction;
 		return (hashFunction(taskName));
 	}
 };
 
 class Peer {
-private:
-	std::string name;
-	std::string groupLeaderName;
-	std::string zoneName;
-	int id;
-	int missedHeartbeats;
-
 public:
 	//constructors
-	Peer(const std::string& name, const std::string& leaderName, const std::string& zone, int id) : name(name), groupLeaderName(leaderName), zoneName(zone), id(id), missedHeartbeats(0) {}
-		
-	Peer(const std::string& name) : name(name) {}
+	Peer(const std::string& name, const std::string& leaderName, const std::string& zone, int id) :
+	name(name), groupLeaderName(leaderName), zoneName(zone), id(id), missedHeartbeats(0)
+	{
+		anonName = createAnonName(name);
+		anonGroupLeaderName = createAnonName(groupLeaderName);
+	}
 
 	//setters
 	void resetHeartbeats() {
@@ -378,26 +368,72 @@ public:
 		missedHeartbeats += 1;
 	}
 
+	void setZoneName(std::string zoneNm)
+	{
+		zoneName = zoneNm;
+	}
+
+	void setGroupLeaderName(std::string leaderName)
+	{
+		groupLeaderName = leaderName;
+		anonGroupLeaderName = createAnonName(leaderName);
+	}
+
 	//getters
 	int getMissedHeartbeats() const {
 		return missedHeartbeats;
 	}
 
-	std::string getName(bool anonMode) const {
-		if (!anonMode)
+	const std::string_view getName(bool anonMode) const
+	{
+		if (anonMode)
 		{
-			return name;
+			return anonName;
 		}
-		return std::string(1, name.front()) + "***" + std::string(1, name.back());
+		return name;
+
 	}
 
-	std::string getName() const
+	const std::string_view getName() const
 	{
 		return getName(false);
 	}
 
+	const std::string_view getGroupLeaderName(bool anonMode) const
+	{
+		if (anonMode)
+		{
+			return anonGroupLeaderName;
+		}
+		return groupLeaderName;
+	}
+
+	const std::string_view getGroupLeaderName() const
+	{
+		return getGroupLeaderName(false);
+	}
+
 	int getId() const {
 		return id;
+	}
+
+	const std::string_view getZoneName() const
+	{
+		return zoneName;
+	}
+
+	
+private:
+	std::string name;
+	std::string groupLeaderName;
+	std::string zoneName;
+	std::string anonName;
+	std::string anonGroupLeaderName;
+	int id;
+	int missedHeartbeats;
+
+	static std::string createAnonName(const std::string& name) {
+		return std::string(1, name.front()) + "***" + std::string(1, name.back());
 	}
 };
 
@@ -407,6 +443,8 @@ public:
 	bool showTaskHudWindow = false;
 	bool anonMode = false;
 	bool isRegistered = false;
+	bool communicationEnabled = false;
+	bool welcomeSent = false;
 	int selectedCharIndex = 0;
 	int selectedPeerIndex = 0;
 	int selectedTaskIndex = 0;
@@ -426,7 +464,7 @@ public:
 	}
 
 	void addPeer(const std::string& name, const std::string& leaderName, const std::string& zoneName, int id) {
-		peerList.emplace_back(name, leaderName, zoneName, id);
+		peerList.emplace_back(Peer(name, leaderName, zoneName, id));
 	}
 
 	void removePeerById(int id) {
@@ -486,7 +524,7 @@ public:
 	}
 	
 	std::optional<Character> getCharacterById(int id) {
-		for (const auto& character : characters) {
+		for (auto& character : characters) {
 			if (character.getId() == id) {
 				return character;
 			}
@@ -494,8 +532,8 @@ public:
 		return std::nullopt;
 	}
 	
-	std::optional<Peer> getPeerById(int id) const {
-		for (const auto& peer : peerList) 
+	std::optional<Peer> getPeerById(int id) {
+		for (auto& peer : peerList) 
 		{
 			if (peer.getId() == id) {
 				return peer;
@@ -512,7 +550,7 @@ public:
 		return static_cast<int>(characters.size());
 	}
 
-	Peer getPeerAtIndex(int idx) {
+	Peer& getPeerAtIndex(int idx) {
 		return peerList[idx];
 	}
 
@@ -520,9 +558,9 @@ public:
 		return peerList;
 	}
 
-	std::optional<Character> getCharacterByName(const std::string& name) {
-		for (const auto& character : characters) {
-			if (character.getCharName() == name) {
+	std::optional<Character> getCharacterByName(const std::string_view name) {
+		for (auto& character : characters) {
+			if (character.getCharacterName() == name) {
 				return character;
 			}
 		}
@@ -535,12 +573,7 @@ private:
 	std::vector<Peer> peerList;
 };
 
-void drawComboBoxes(const std::string& myGroupLeader, const std::string& myZone, const bool& amIGrouped);
-void drawCharactersMissingTask(std::string_view myGroupLeader, std::string_view myZone, const Task& selectedTask);
-void drawCharsMissingObj(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Objective& objective);
-void drawTaskDetails(std::string_view myGroupLeader, std::string_view myZone, const bool& amIGrouped, const Task& selectedTask);
-void drawTaskHud(const Task& selectedTask);
-void drawTaskHudLoading();
+
 std::vector<Task> getTasks();
 void requestTasks();
 void requestPeers();

@@ -5,66 +5,81 @@
 #include "routing/PostOffice.h"
 
 //send
+void MessageHandler::requestTasks()
+{
+	if (taskTable.communicationEnabled)
+	{
+		postoffice::Address address;
+		proto::TaskHud::TaskHud message;
+		proto::TaskHud::RequestMessage reqMsg;
+		reqMsg.set_reqchar(pLocalPlayer->DisplayedName);
+		message.set_id(proto::TaskHud::Request);
+		message.set_payload(reqMsg.SerializeAsString());
+		THDropbox.Post(address, message);
+	}
+}
+
 void MessageHandler::sendTasks(const std::vector<Task>& tasks) {
-	if (GetGameState() != GAMESTATE_INGAME) {
-		return;
-	}
-	proto::TaskHud::TaskTable message;
-	message.set_character(pLocalPlayer->DisplayedName);
-	message.set_groupleadername(pLocalPC->Group ? std::string(pLocalPC->Group->GetGroupLeader()->GetName()) : "none");
-	message.set_zone(pZoneInfo->ShortName);
-	message.set_charid(GetCurrentProcessId());
-
-	for (const auto& task : tasks) {
-		auto* protoTask = message.add_tasks();
-		protoTask->set_name(task.getTaskName());
-		for (const auto& objective : task.getObjectives()) {
-			auto* protoObjective = protoTask->add_objectives();
-			const auto& values = objective.getValues();
-			protoObjective->set_objectivetext(values.objectiveText);
-			protoObjective->set_iscompleted(values.isCompleted);
-			protoObjective->set_progress(values.progress);
-			protoObjective->set_required(values.required);
-			protoObjective->set_index(values.index);
+	if (taskTable.communicationEnabled) 
+	{
+		proto::TaskHud::TaskTable message;
+		message.set_character(pLocalPlayer->DisplayedName);
+		message.set_groupleadername(pLocalPC->Group ? std::string(pLocalPC->Group->GetGroupLeader()->GetName()) : "none");
+		message.set_zone(pZoneInfo->ShortName);
+		message.set_charid(GetCurrentProcessId());
+		for (const auto& task : tasks) {
+			auto* protoTask = message.add_tasks();
+			protoTask->set_name(std::string(task.getTaskName()));
+			for (const auto& objective : task.getObjectives()) {
+				auto* protoObjective = protoTask->add_objectives();
+				const auto& values = objective.getValues();
+				protoObjective->set_objectivetext(values.objectiveText);
+				protoObjective->set_iscompleted(values.isCompleted);
+				protoObjective->set_progress(values.progress);
+				protoObjective->set_required(values.required);
+				protoObjective->set_index(values.index);
+			}
 		}
+		proto::TaskHud::TaskHud payload;
+		payload.set_id(proto::TaskHud::Incoming);
+		payload.set_payload(message.SerializeAsString());
+		postoffice::Address address;
+		THDropbox.Post(address, payload);
 	}
-
-	proto::TaskHud::TaskHud payload;
-	payload.set_id(proto::TaskHud::Incoming);
-	payload.set_payload(message.SerializeAsString());
-	postoffice::Address address;
-	THDropbox.Post(address, payload);
 }
 
 void MessageHandler::sendHeartbeatMessages(HeartbeatType type, int charId) {
-	proto::TaskHud::HeartbeatMessages message;
-	message.set_name(pLocalPlayer->DisplayedName);
-	message.set_zone(pZoneInfo->ShortName);
-	message.set_groupleadername(pLocalPC->Group ? std::string(pLocalPC->Group->GetGroupLeader()->GetName()) : "none");
-	message.set_charid(GetCurrentProcessId());
-	postoffice::Address address;
-	proto::TaskHud::TaskHud payload;
-	switch (type) {
-	case HeartbeatType::Register: 
-		payload.set_id(proto::TaskHud::Register);
-		break;
-	case HeartbeatType::RegisterResponse: 
-		payload.set_id(proto::TaskHud::RegisterResponse);
-		address.PID = charId;
-		break;
-	case HeartbeatType::PauseHeartbeat: 
-		payload.set_id(proto::TaskHud::PauseHeartbeat);
-		break;
-	case HeartbeatType::ResumeHeartbeat: 
-		payload.set_id(proto::TaskHud::ResumeHeartbeat);
-		break;
-	case HeartbeatType::Heartbeat: 
-		payload.set_id(proto::TaskHud::Heartbeat);
-		break;
-	}
-	payload.set_payload(message.SerializeAsString());
+	if (taskTable.communicationEnabled)
+	{
+		proto::TaskHud::HeartbeatMessages message;
+		message.set_name(pLocalPlayer->DisplayedName);
+		message.set_zone(pZoneInfo->ShortName);
+		message.set_groupleadername(pLocalPC->Group ? std::string(pLocalPC->Group->GetGroupLeader()->GetName()) : "none");
+		message.set_charid(GetCurrentProcessId());
+		postoffice::Address address;
+		proto::TaskHud::TaskHud payload;
+		switch (type) {
+		case HeartbeatType::Register:
+			payload.set_id(proto::TaskHud::Register);
+			break;
+		case HeartbeatType::RegisterResponse:
+			payload.set_id(proto::TaskHud::RegisterResponse);
+			address.PID = charId;
+			break;
+		case HeartbeatType::PauseHeartbeat:
+			payload.set_id(proto::TaskHud::PauseHeartbeat);
+			break;
+		case HeartbeatType::ResumeHeartbeat:
+			payload.set_id(proto::TaskHud::ResumeHeartbeat);
+			break;
+		case HeartbeatType::Heartbeat:
+			payload.set_id(proto::TaskHud::Heartbeat);
+			break;
+		}
+		payload.set_payload(message.SerializeAsString());
 
-	THDropbox.Post(address, payload);
+		THDropbox.Post(address, payload);
+	}
 }
 
 void MessageHandler::sendHeartbeatMessages(HeartbeatType type)
@@ -74,8 +89,7 @@ void MessageHandler::sendHeartbeatMessages(HeartbeatType type)
 
 //process data
 void MessageHandler::processIncomingMessage(const proto::TaskHud::TaskTable& protoTaskTable) {
-	Character newCharacter(protoTaskTable.character());
-	newCharacter.setGroupLeaderName(protoTaskTable.groupleadername());
+	Character newCharacter(protoTaskTable.character(), protoTaskTable.groupleadername(), protoTaskTable.zone(), protoTaskTable.charid());
 	for (const auto& protoTask : protoTaskTable.tasks()) {
 		Task newTask(protoTask.name());
 		for (const auto& protoObjective : protoTask.objectives()) {
@@ -90,8 +104,6 @@ void MessageHandler::processIncomingMessage(const proto::TaskHud::TaskTable& pro
 		}
 		newCharacter.addTask(newTask);
 	}
-	newCharacter.setZoneShortName(protoTaskTable.zone());
-	newCharacter.setCharId(protoTaskTable.charid());
 	taskTable.addCharacter(newCharacter);
 	if (taskTable.getCharacterCount() == taskTable.getPeerCount())
 	{
@@ -112,7 +124,7 @@ void MessageHandler::processRegisterMessage(const proto::TaskHud::HeartbeatMessa
 	bool peerExists = false;
 	bool updated = false;
 
-	for (auto& peer : taskTable.getPeers())
+	for (const auto& peer : taskTable.getPeers())
 	{
 		if (peer.getName() == heartbeatMessage.name())
 		{
@@ -135,13 +147,16 @@ void MessageHandler::processRegisterMessage(const proto::TaskHud::HeartbeatMessa
 	{
 		taskTable.addPeer(heartbeatMessage.name(), heartbeatMessage.groupleadername(), heartbeatMessage.zone(), heartbeatMessage.charid());
 		taskTable.sortPeersByName();
-		if (auto&& peerOpt = taskTable.getPeerById(heartbeatMessage.charid()))
+		if (auto peerOpt = taskTable.getPeerById(heartbeatMessage.charid()))
 		{
-			auto& peer = *peerOpt;
+			Peer& peer = *peerOpt;
 			peer.resetHeartbeats();
 		}
 	}
-	sendHeartbeatMessages(HeartbeatType::RegisterResponse, heartbeatMessage.charid());
+	if (GetGameState() == GAMESTATE_INGAME)
+	{
+		sendHeartbeatMessages(HeartbeatType::RegisterResponse, heartbeatMessage.charid());
+	}
 }
 
 //register response message
