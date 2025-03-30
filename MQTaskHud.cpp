@@ -173,6 +173,14 @@ void thCmd(PlayerClient* pChar, const char* szLine) {
 			taskTable.clearPeerList();
 		}
 	}
+	else
+	{
+		WriteChatf(PLUGIN_MSG "\ar/th show    \ag--- Show UI");
+		WriteChatf(PLUGIN_MSG "\ar/th hide    \ag--- Hide UI");
+		WriteChatf(PLUGIN_MSG "\ar/th anon    \ag--- Anonymize character names");
+		WriteChatf(PLUGIN_MSG "\ar/th refresh \ag--- Refresh data");
+		return;
+	}
 }
 
 std::vector<Task> getTasks()
