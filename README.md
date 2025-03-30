@@ -1,10 +1,8 @@
 # MQTaskHud
 
-One Paragraph project description goes here
+MQTaskHud allows you to view the progress and differences between tasks of characters running on the same machine. You can see who is ahead or behind in progress compared to another character, what step they are on, and who does not have the quest.
 
 ## Getting Started
-
-Quick start instructions to get users up and going
 
 ```txt
 /plugin MQTaskHud
@@ -15,28 +13,19 @@ Quick start instructions to get users up and going
 Describe the commands available and how to use them.
 
 ```txt
-Give examples
+/th show    --- Show UI
+/th hide    --- Hide UI
+/th anon    --- Anonymize character names
+/th refresh --- Refresh data
 ```
-
-### Configuration File
-
-Describe the configuration file and what the settings do
-
-```yaml
-- Example goes here
-```
-
 ## Other Notes
 
 Add additional notes
 
 ## Authors
 
-* **Your name** - *Initial work*
-
-See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.
+**Lisie (yb-f)Your name**
 
 ## Acknowledgments
 
-* Inspiration from...
-* I'd like to thank the Thieves' Guild for helping me with all the code I stole...
+* Thank you to those who make this a possibility. The MacroQuest team and the RedGuides team.
