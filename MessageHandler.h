@@ -14,8 +14,6 @@ enum class HeartbeatType
 
 class MessageHandler {
 public:
-	MessageHandler();
-
 	// Send functions
 	static void requestTasks();
 	static void sendTasks(const std::vector<Task>& tasks);
